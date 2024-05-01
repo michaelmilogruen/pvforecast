@@ -16,6 +16,7 @@ import os
 import xlwings as xw
 import matplotlib.pyplot as plt
 import pandas as pd
+import poadata
 
 def edit_excel(excel_file):
     """
@@ -185,6 +186,15 @@ start = '2020-01-01 00:00'
 end = '2020-12-31 23:00'
 
 # Get POA data from the PVGIS API using the iotools call
+latitude = 47.38770748541585
+longitude = 15.094127778561258
+tilt = 30
+azimuth = 149.716  # azimuth for SOUTH (pvlib = 180°, PVGIS = 0°)
+
+poa_data_2020 = poadata.get_pvgis_data(latitude, longitude, 2020, 2020, tilt, azimuth)
+
+# Save the data as a CSV file
+poa_data_2020.to_csv("poa_data_2020_Leoben_EVT_io.csv")
 poa_data_2020 = pd.read_csv('poa_data_2020_Leoben_EVT_io.csv', index_col=0)
 poa_data_2020.index = pd.date_range(start='2020-01-01 00:00',
                                     periods=len(poa_data_2020.index),
@@ -255,7 +265,7 @@ ac_results = pvlib.inverter.sandia(
     p_dc=dc_scaled.p_mp,
     inverter=inverter)
 
-cec_inverters.to_excel("CEC_Inverters_1.xlsx")
+# cec_inverters.to_excel("CEC_Inverters_1.xlsx")
 
 # Preparing the results dataframe
 results_spec_sheet_df = pd.concat([ac_results, dc_scaled.i_mp, dc_scaled.v_mp, dc_scaled.p_mp, temp_cell], axis=1)
@@ -264,7 +274,7 @@ results_spec_sheet_df = pd.concat([ac_results, dc_scaled.i_mp, dc_scaled.v_mp, d
 results_spec_sheet_df.columns = ['AC Power', 'DC scaled I_mp', 'DC scaled V_mp', 'DC scaled P_mp', 'Cell Temperature']
 
 # Creating an Excel writer object
-with pd.ExcelWriter("complete_spec_sheet_results_poa_data.xlsx") as writer:
+with pd.ExcelWriter("results.xlsx") as writer:
     # Saving the model chain results to the first worksheet
     results_spec_sheet_df.to_excel(writer, sheet_name='Model Chain Results')
 

@@ -12,6 +12,7 @@ import pandas as pd
 import pvlib
 
 
+
 def get_pvgis_data(latitude, longitude, start_year, end_year, tilt, azimuth):
     """
     Retrieve hourly plane-of-array (POA) irradiance data from the PVGIS API.
