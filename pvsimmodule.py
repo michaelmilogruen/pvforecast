@@ -35,7 +35,106 @@ def edit_excel(excel_file):
 
     # VBA code as a Python string
     vba_code = """
-    ... (VBA code omitted for brevity) ...
+    'CREATE WORKSHEET RESULTS
+        Dim ws As Worksheet
+
+        ' Check if the worksheet already exists
+        On Error Resume Next
+        Set ws = ThisWorkbook.Sheets("RESULTS")
+        On Error GoTo 0
+    
+        ' If the worksheet does not exist, create it as the first sheet
+        If ws Is Nothing Then
+            Set ws = ThisWorkbook.Sheets.Add(Before:=ThisWorkbook.Sheets(1))
+            ws.Name = "RESULTS"
+        Else
+            MsgBox "Sheet 'RESULTS' already exists."
+        End If
+        
+        '______________________________________________________________________
+        
+        'COPY TIMESTEMP FROM MODEL CHAIN RESULTS
+        
+        Dim sourceWs As Worksheet, targetWs As Worksheet
+        Dim lastRow As Long
+    
+        ' Set the source and target worksheets
+        Set sourceWs = ThisWorkbook.Sheets("Model Chain Results")
+        Set targetWs = ThisWorkbook.Sheets("RESULTS")
+    
+        ' Find the last row in column A in the source worksheet
+        lastRow = sourceWs.Cells(sourceWs.Rows.Count, "A").End(xlUp).Row
+    
+        ' Copy the entire column A from source to target worksheet
+        sourceWs.Range("A1:A" & lastRow).Copy Destination:=targetWs.Range("A1")
+        '______________________________________________________________________
+        
+        'INSERT DAY MONTH AND HOUR
+                
+        Dim i As Long
+        Dim dateTime As Variant
+    
+        ' Set the worksheet
+        Set ws = ThisWorkbook.Sheets("RESULTS")
+    
+        ' Find the last row in column A
+        lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    
+        ' Loop through each row and calculate the weekday, month and hour
+        For i = 1 To lastRow
+            ' Check if the cell is not empty
+            If ws.Cells(i, "A").Value <> "" Then
+                ' Extract the date and time value from the timestamp
+                dateTime = ws.Cells(i, "A").Value
+                
+                ' Write the weekday to column B
+                ws.Cells(i, "B").Value = WeekdayName(Weekday(dateTime, vbMonday))
+                ' Write the month to column C
+                ws.Cells(i, "C").Value = MonthName(Month(dateTime))
+                ' Write the hour to column D
+                ws.Cells(i, "D").Value = Hour(dateTime)
+            End If
+        Next i
+        '______________________________________________________________________
+        
+        'COPY POWER AC FROM MODEL CHAIN RESULTS
+        
+
+
+        ' Set the source and target worksheets
+        Set sourceWs = ThisWorkbook.Sheets("Model Chain Results")
+        Set targetWs = ThisWorkbook.Sheets("RESULTS")
+    
+        ' Find the last row with data in column B on the source worksheet
+        lastRow = sourceWs.Cells(sourceWs.Rows.Count, "B").End(xlUp).Row
+    
+        ' Loop through each row and copy data from source to target column E
+        For i = 1 To lastRow
+            ' If source cell is empty, write 0, otherwise copy the value
+            If IsEmpty(sourceWs.Cells(i, "B").Value) Then
+                targetWs.Cells(i, "E").Value = 0
+            Else
+                targetWs.Cells(i, "E").Value = sourceWs.Cells(i, "B").Value
+            End If
+        Next i  
+        
+        '______________________________________________________________________
+        
+        'COPY TEMPERATURE FROM TMY DATA
+        
+        Dim wsSource As Worksheet
+        Dim wsDest As Worksheet
+    
+        ' Define worksheets
+        Set wsSource = ThisWorkbook.Sheets("TMY Data")
+        Set wsDest = ThisWorkbook.Sheets("RESULTS")
+    
+        ' Copy column B from TMY Data to column F in RESULTS
+        wsSource.Columns("B:B").Copy Destination:=wsDest.Columns("F:F")
+         
+        
+    End Sub
+
     """
 
     # Add the VBA code to the workbook's VBProject
