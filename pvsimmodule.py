@@ -179,7 +179,7 @@ def calculate_power_output(start: str, end: str, latitude: float, longitude: flo
                            tilt: float, azimuth: float, celltype: str, pdc0: int,
                            v_mp: float, i_mp: float, v_oc: float, i_sc: float,
                            alpha_sc: float, beta_voc: float, gamma_pdc: float,
-                           cells_in_series: int, temp_ref: int) -> None:
+                           cells_in_series: int, temp_ref: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     This function calculates the power output of the photovoltaic system.
 
@@ -203,7 +203,7 @@ def calculate_power_output(start: str, end: str, latitude: float, longitude: flo
         temp_ref (int): Reference temperature [°C].
 
     Returns:
-        None: The function saves the results in an Excel file.
+        Tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the ac_results and poa_data_2020 DataFrames.
     """
     # Assuming that the PV system is located in Leoben, EVT
     location = Location(latitude=latitude, longitude=longitude,
@@ -289,11 +289,16 @@ def calculate_power_output(start: str, end: str, latitude: float, longitude: flo
         # Saving the original poa data to a new worksheet
         poa_data_2020.to_excel(writer, sheet_name='POA Data')
 
+    return ac_results, poa_data_2020
 
 
-def plot_results():
+
+def plot_results(ac_results: pd.DataFrame):
     """
     This function plots the results of the power output calculations.
+
+    Args:
+        ac_results (pd.DataFrame): The DataFrame containing the AC power results.
     """
     # Plotting the results - 1) Energy yield from start to end (see above for setting of start and end)
     ac_results.plot(figsize=(16, 9))
@@ -315,12 +320,12 @@ def main():
     Main function to run the script.
     """
     # Call the separate functions here
-    calculate_power_output(start, end, latitude, longitude,
-                           tilt, azimuth, celltype, pdc0,
-                           v_mp, i_mp, v_oc, i_sc,
-                           alpha_sc, beta_voc, gamma_pdc,
-                           cells_in_series, temp_ref)
-    plot_results()
+    ac_results, poa_data_2020 = calculate_power_output(start, end, latitude, longitude,
+                                                       tilt, azimuth, celltype, pdc0,
+                                                       v_mp, i_mp, v_oc, i_sc,
+                                                       alpha_sc, beta_voc, gamma_pdc,
+                                                       cells_in_series, temp_ref)
+    plot_results(ac_results)
     edit_excel("results.xlsx")
 
 if __name__ == '__main__':
