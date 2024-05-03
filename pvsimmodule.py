@@ -1,5 +1,3 @@
-from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.dimensions import ColumnDimension
 # -*- coding: utf-8 -*-
 """
 Author: Michael Grün
@@ -11,18 +9,21 @@ Date: 2023-05-15
 """
 
 import os
+from typing import Dict, List, Tuple
+
+import matplotlib.pyplot as plt
+import openpyxl
+import pandas as pd
 import pvlib
-from pvlib.modelchain import ModelChain
+import openpyxl
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.dimensions import ColumnDimension
 from pvlib.location import Location
+from pvlib.modelchain import ModelChain
 from pvlib.pvsystem import PVSystem
 from pvlib.temperature import TEMPERATURE_MODEL_PARAMETERS
-import xlwings as xw
-import matplotlib.pyplot as plt
-import pandas as pd
 import poadata
-import openpyxl
-from typing import List, Dict
-from typing import Tuple
+import xlwings as xw
 
 # Define parameters
 start = '2020-01-01 00:00'
@@ -43,11 +44,6 @@ gamma_pdc = -0.405  # Temperature coefficient for pdc0 (Pmp) [%/K] (directly tak
 cells_in_series = 3 * 23
 temp_ref = 25  # Reference temperature [°C]
 
-# Define separate functions here
-import openpyxl
-from collections import OrderedDict
-
-import openpyxl
 
 def execute_vba_actions(file_name: str) -> None:
     """
@@ -101,14 +97,6 @@ def execute_vba_actions(file_name: str) -> None:
     # Save the modified workbook
     workbook.save(file_name)
 
-# Call the function with the file name as an argument
-execute_vba_actions('results.xlsx')
-
-
-
-
-
-
 
 
 def calculate_power_output(start: str, end: str, latitude: float, longitude: float,
@@ -158,7 +146,7 @@ def calculate_power_output(start: str, end: str, latitude: float, longitude: flo
 
     # Calculate solar position
     solarpos = location.get_solarposition(times=pd.date_range(start, end=end,
-                                                               freq="h"))
+                                                              freq="h"))
 
     # Calculate angle of incidence and incidence angle modifier
     aoi = pvlib.irradiance.aoi(
@@ -173,25 +161,25 @@ def calculate_power_output(start: str, end: str, latitude: float, longitude: flo
 
     # Calculating characteristic single-diode-model-output parameters
     I_L_ref, I_o_ref, R_s, R_sh_ref, a_ref, Adjust = pvlib.ivtools.sdm.fit_cec_sam(celltype=celltype,
-                                                                                    v_mp=v_mp,
-                                                                                    i_mp=i_mp,
-                                                                                    v_oc=v_oc,
-                                                                                    i_sc=i_sc,
-                                                                                    alpha_sc=alpha_sc,
-                                                                                    beta_voc=beta_voc,
-                                                                                    gamma_pmp=gamma_pdc,
-                                                                                    cells_in_series=cells_in_series)
+                                                                                   v_mp=v_mp,
+                                                                                   i_mp=i_mp,
+                                                                                   v_oc=v_oc,
+                                                                                   i_sc=i_sc,
+                                                                                   alpha_sc=alpha_sc,
+                                                                                   beta_voc=beta_voc,
+                                                                                   gamma_pmp=gamma_pdc,
+                                                                                   cells_in_series=cells_in_series)
 
     # Calculating CEC parameters
     cec_params = pvlib.pvsystem.calcparams_cec(effective_irradiance,
-                                                temp_cell,
-                                                alpha_sc,
-                                                a_ref,
-                                                I_L_ref,
-                                                I_o_ref,
-                                                R_sh_ref,
-                                                R_s,
-                                                Adjust)
+                                               temp_cell,
+                                               alpha_sc,
+                                               a_ref,
+                                               I_L_ref,
+                                               I_o_ref,
+                                               R_sh_ref,
+                                               R_s,
+                                               Adjust)
 
     # 1) Maximum power point
     mpp = pvlib.pvsystem.max_power_point(*cec_params, method="newton")  # Use the cec_params for a single module
@@ -215,7 +203,8 @@ def calculate_power_output(start: str, end: str, latitude: float, longitude: flo
     results_spec_sheet_df = pd.concat([ac_results, dc_scaled.i_mp, dc_scaled.v_mp, dc_scaled.p_mp, temp_cell], axis=1)
 
     # Setting custom column names
-    results_spec_sheet_df.columns = ['AC Power', 'DC scaled I_mp', 'DC scaled V_mp', 'DC scaled P_mp', 'Cell Temperature']
+    results_spec_sheet_df.columns = ['AC Power', 'DC scaled I_mp', 'DC scaled V_mp', 'DC scaled P_mp',
+                                     'Cell Temperature']
 
     # Creating an Excel writer object
     with pd.ExcelWriter("results.xlsx") as writer:
@@ -228,27 +217,35 @@ def calculate_power_output(start: str, end: str, latitude: float, longitude: flo
     return ac_results, poa_data_2020
 
 
-
-def plot_results(ac_results: pd.DataFrame):
+def plot_results(ac_results: pd.DataFrame, figsize=(16, 9)):
     """
     This function plots the results of the power output calculations.
 
     Args:
         ac_results (pd.DataFrame): The DataFrame containing the AC power results.
+        figsize (tuple, optional): The figure size. Defaults to (16, 9).
     """
-    # Plotting the results - 1) Energy yield from start to end (see above for setting of start and end)
-    ac_results.plot(figsize=(16, 9))
-    plt.title("AC Power - PVSystem")
-    plt.plot()
-    plt.grid()
-    plt.show()
+    try:
+        # Plotting the results - Energy yield from start to end
+        ac_results.plot(figsize=figsize)
+        plt.title("AC Power - PVSystem")
+        plt.xlabel("Time")
+        plt.ylabel("Energy Yield")
+        plt.grid(True)
+        plt.savefig("energy_yield_start_to_end.png")
 
-    # # Plotting the results - 2) Energy yield over one year - monthly sum -> trendline
-    # ac_results.resample('M').sum().plot(figsize=(16, 9))
-    # plt.title("Leoben_EVT - POA_Data - Monthly Sum")
-    # # Adding a grid to the plot
-    # plt.grid()
-    # plt.show()
+        # Plotting the results - Energy yield over one year - monthly sum
+        monthly_sum = ac_results.resample('M').sum()
+        monthly_sum.plot(figsize=figsize)
+        plt.title("AC Power - PVSystem (Monthly Sum)")
+        plt.xlabel("Time")
+        plt.ylabel("Energy Yield")
+        plt.grid(True)
+        plt.savefig("energy_yield_monthly_sum.png")
+
+        plt.show()
+    except (TypeError, ValueError) as e:
+        print(f"An error occurred: {e}")
 
 
 def main():
@@ -267,4 +264,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
