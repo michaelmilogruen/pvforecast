@@ -1,4 +1,5 @@
-from typing import Tuple
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.dimensions import ColumnDimension
 # -*- coding: utf-8 -*-
 """
 Author: Michael Grün
@@ -19,6 +20,9 @@ import xlwings as xw
 import matplotlib.pyplot as plt
 import pandas as pd
 import poadata
+import openpyxl
+from typing import List, Dict
+from typing import Tuple
 
 # Define parameters
 start = '2020-01-01 00:00'
@@ -40,140 +44,72 @@ cells_in_series = 3 * 23
 temp_ref = 25  # Reference temperature [°C]
 
 # Define separate functions here
-def edit_excel(excel_file):
+import openpyxl
+from collections import OrderedDict
+
+import openpyxl
+
+def execute_vba_actions(file_name: str) -> None:
     """
-        This function edits an Excel workbook by running a VBA macro.
-        The macro performs the following tasks:
-        1. Creates a new worksheet named "RESULTS" (if it doesn't exist)
-        2. Copies the timestamp column from the "Model Chain Results" sheet to the "RESULTS" sheet
-        3. Inserts the weekday, month, and hour columns in the "RESULTS" sheet
-        4. Copies the "Power AC" column from the "Model Chain Results" sheet to the "RESULTS" sheet
-        5. Copies the temperature column from the "TMY Data" sheet to the "RESULTS" sheet
+    Executes various VBA actions on an Excel file using the openpyxl library.
 
-        Args:
-            excel_file (str): The path to the Excel file.
-        """
-    # Check if the excel_file exists
-    if not os.path.exists(excel_file):
-        raise FileNotFoundError(f"Excel file '{excel_file}' does not exist.")
+    Args:
+        file_name: The name of the Excel file to be processed.
 
-    # Open the specified Excel workbook
-    wb = xw.Book(excel_file)
+    Returns:
+        None. The function modifies the specified Excel file in-place.
+    """
+    workbook = openpyxl.load_workbook(file_name)
+    model_chain_results = workbook['Model Chain Results']
+    poa_data = workbook['POA Data']
 
-    # VBA code as a Python string
-    vba_code = """
-        'CREATE WORKSHEET RESULTS
-            Dim ws As Worksheet
+    # Autofit column F in 'Model Chain Results' worksheet
+    model_chain_results.column_dimensions['F'].auto_size = True
 
-            ' Check if the worksheet already exists
-            On Error Resume Next
-            Set ws = ThisWorkbook.Sheets("RESULTS")
-            On Error GoTo 0
+    # Autofill range B8712:B8785 in 'Model Chain Results' worksheet
+    start_value = model_chain_results['B8712'].value
+    for row in range(8712, 8786):
+        model_chain_results.cell(row=row, column=2, value=start_value)
 
-            ' If the worksheet does not exist, create it as the first sheet
-            If ws Is Nothing Then
-                Set ws = ThisWorkbook.Sheets.Add(Before:=ThisWorkbook.Sheets(1))
-                ws.Name = "RESULTS"
-            Else
-                MsgBox "Sheet 'RESULTS' already exists."
-            End If
+    # Autofit column F again
+    model_chain_results.column_dimensions['F'].auto_size = True
 
-            '______________________________________________________________________
+    # Autofit all columns in 'Model Chain Results' worksheet
+    for column in model_chain_results.columns:
+        max_length = max(len(str(cell.value)) for cell in column)
+        adjusted_width = (max_length + 2) * 1.2
+        column_letter = get_column_letter(column[0].column)
+        model_chain_results.column_dimensions[column_letter].width = adjusted_width
 
-            'COPY TIMESTEMP FROM MODEL CHAIN RESULTS
+    # Autofit columns in 'POA Data' worksheet
+    for column in poa_data.columns:
+        max_length = max(len(str(cell.value)) for cell in column)
+        adjusted_width = (max_length + 2) * 1.2
+        column_letter = get_column_letter(column[0].column)
+        poa_data.column_dimensions[column_letter].width = adjusted_width
 
-            Dim sourceWs As Worksheet, targetWs As Worksheet
-            Dim lastRow As Long
+    # Copy range from 'POA Data' to 'Model Chain Results'
+    poa_data_range = poa_data['B1:J' + str(poa_data.max_row)]
+    model_chain_results['G1'].value = None
+    for row in poa_data_range:
+        for cell in row:
+            model_chain_results.cell(row=cell.row, column=cell.column - 1 + 7, value=cell.value)
 
-            ' Set the source and target worksheets
-            Set sourceWs = ThisWorkbook.Sheets("Model Chain Results")
-            Set targetWs = ThisWorkbook.Sheets("RESULTS")
+    # Autofit column G in 'Model Chain Results'
+    model_chain_results.column_dimensions['G'].auto_size = True
 
-            ' Find the last row in column A in the source worksheet
-            lastRow = sourceWs.Cells(sourceWs.Rows.Count, "A").End(xlUp).Row
+    # Save the modified workbook
+    workbook.save(file_name)
 
-            ' Copy the entire column A from source to target worksheet
-            sourceWs.Range("A1:A" & lastRow).Copy Destination:=targetWs.Range("A1")
-            '______________________________________________________________________
-
-            'INSERT DAY MONTH AND HOUR
-
-            Dim i As Long
-            Dim dateTime As Variant
-
-            ' Set the worksheet
-            Set ws = ThisWorkbook.Sheets("RESULTS")
-
-            ' Find the last row in column A
-            lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
-
-            ' Loop through each row and calculate the weekday, month and hour
-            For i = 1 To lastRow
-                ' Check if the cell is not empty
-                If ws.Cells(i, "A").Value <> "" Then
-                    ' Extract the date and time value from the timestamp
-                    dateTime = ws.Cells(i, "A").Value
-
-                    ' Write the weekday to column B
-                    ws.Cells(i, "B").Value = WeekdayName(Weekday(dateTime, vbMonday))
-                    ' Write the month to column C
-                    ws.Cells(i, "C").Value = MonthName(Month(dateTime))
-                    ' Write the hour to column D
-                    ws.Cells(i, "D").Value = Hour(dateTime)
-                End If
-            Next i
-            '______________________________________________________________________
-
-            'COPY POWER AC FROM MODEL CHAIN RESULTS
-
-            ' Set the source and target worksheets
-            Set sourceWs = ThisWorkbook.Sheets("Model Chain Results")
-            Set targetWs = ThisWorkbook.Sheets("RESULTS")
-
-            ' Find the last row with data in column B on the source worksheet
-            lastRow = sourceWs.Cells(sourceWs.Rows.Count, "B").End(xlUp).Row
-
-            ' Loop through each row and copy data from source to target column E
-            For i = 1 To lastRow
-                ' If source cell is empty, write 0, otherwise copy the value
-                If IsEmpty(sourceWs.Cells(i, "B").Value) Then
-                    targetWs.Cells(i, "E").Value = 0
-                Else
-                    targetWs.Cells(i, "E").Value = sourceWs.Cells(i, "B").Value
-                End If
-            Next i  
-
-            '______________________________________________________________________
-
-            'COPY TEMPERATURE FROM TMY DATA
-
-            Dim wsSource As Worksheet
-            Dim wsDest As Worksheet
-
-            ' Define worksheets
-            Set wsSource = ThisWorkbook.Sheets("TMY Data")
-            Set wsDest = ThisWorkbook.Sheets("RESULTS")
-
-            ' Copy column B from TMY Data to column F in RESULTS
-            wsSource.Columns("B:B").Copy Destination:=wsDest.Columns("F:F")
+# Call the function with the file name as an argument
+execute_vba_actions('results.xlsx')
 
 
-        End Sub
-        """
 
-    # Add the VBA code to the workbook's VBProject
-    wb.api.VBProject.VBComponents.Add(1).CodeModule.AddFromString(vba_code)
 
-    # Run the VBA macro
-    wb.macro('FillWeekdayMonthHour')()
 
-    # Save the workbook if needed
-    # You can choose to overwrite the existing file or save as a new file
-    wb.save(excel_file)  # This will overwrite the existing file
-    # wb.save('new_file_path.xlsx')  # This will save as a new file
 
-    # Close the workbook
-    wb.close()
+
 
 def calculate_power_output(start: str, end: str, latitude: float, longitude: float,
                            tilt: float, azimuth: float, celltype: str, pdc0: int,
@@ -326,7 +262,8 @@ def main():
                                                        alpha_sc, beta_voc, gamma_pdc,
                                                        cells_in_series, temp_ref)
     plot_results(ac_results)
-    edit_excel("results.xlsx")
+    execute_vba_actions('results.xlsx')
+
 
 if __name__ == '__main__':
     main()
