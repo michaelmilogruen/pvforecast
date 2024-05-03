@@ -1,3 +1,4 @@
+from typing import Tuple
 # -*- coding: utf-8 -*-
 """
 Author: Michael Grün
@@ -155,49 +156,41 @@ def edit_excel(excel_file):
     # Close the workbook
     wb.close()
 
-def calculate_power_output():
+def calculate_power_output(start: str, end: str, latitude: float, longitude: float,
+                           tilt: float, azimuth: float, celltype: str, pdc0: int,
+                           v_mp: float, i_mp: float, v_oc: float, i_sc: float,
+                           alpha_sc: float, beta_voc: float, gamma_pdc: float,
+                           cells_in_series: int, temp_ref: int) -> None:
     """
     This function calculates the power output of the photovoltaic system.
-    """
-    # Specifications from the data sheet: KPV_Datenblatt_PE_NEC_Power60_DE_NEU_20120315.pdf
-    celltype = 'polycristalline'
-    pdc0 = 240  # Nominal max. power in [W] (=Pmp)
-    v_mp = 29.87  # Voltage at MP [V]
-    i_mp = 8.04  # Current at MP [A]
-    v_oc = 37.33  # Open-circuit voltage [V]
-    i_sc = 8.78  # Short-circuit current [A]
-    alpha_sc = 0.0041  # Temperature coefficient for i_sc [A/K]
-    beta_voc = -0.114  # Temperature coefficient for v_oc [V/K]
-    gamma_pdc = -0.405  # Temperature coefficient for pdc0 (Pmp) [%/K] (directly take procentual value --> V11)
-    cells_in_series = 3 * 23
-    temp_ref = 25  # Reference temperature [°C]
 
+    Args:
+        start (str): Start date and time of the simulation in 'YYYY-MM-DD HH:MM' format.
+        end (str): End date and time of the simulation in 'YYYY-MM-DD HH:MM' format.
+        latitude (float): Latitude of the location in decimal degrees.
+        longitude (float): Longitude of the location in decimal degrees.
+        tilt (float): Tilt angle of the PV system surface in degrees.
+        azimuth (float): Azimuth angle of the PV system surface in degrees.
+        celltype (str): Type of PV cell.
+        pdc0 (int): Nominal max. power in [W] (=Pmp).
+        v_mp (float): Voltage at MP [V].
+        i_mp (float): Current at MP [A].
+        v_oc (float): Open-circuit voltage [V].
+        i_sc (float): Short-circuit current [A].
+        alpha_sc (float): Temperature coefficient for i_sc [A/K].
+        beta_voc (float): Temperature coefficient for v_oc [V/K].
+        gamma_pdc (float): Temperature coefficient for pdc0 (Pmp) [%/K].
+        cells_in_series (int): Number of cells in series.
+        temp_ref (int): Reference temperature [°C].
+
+    Returns:
+        None: The function saves the results in an Excel file.
+    """
     # Assuming that the PV system is located in Leoben, EVT
-    location = Location(latitude=47.38770748541585, longitude=15.094127778561258,
+    location = Location(latitude=latitude, longitude=longitude,
                         tz='Europe/Vienna', altitude=547.6, name='EVT')
 
-    surface_tilt = 30
-    surface_azimuth = 149.716
-
-    # Time range for the simulation
-    # 1) One week - 1st week in July 2020
-    # start = '2020-07-01 00:00'
-    # end = '2020-07-07 23:59'
-
-    # 2) One month - July 2020
-    # start = '2020-07-01 00:00'
-    # end = '2020-07-31 23:00'
-
-    # 3) Year 2020
-    start = '2020-01-01 00:00'
-    end = '2020-12-31 23:00'
-
     # Get POA data from the PVGIS API using the iotools call
-    latitude = 47.38770748541585
-    longitude = 15.094127778561258
-    tilt = 30
-    azimuth = 149.716  # azimuth for SOUTH (pvlib = 180°, PVGIS = 0°)
-
     poa_data_2020 = poadata.get_pvgis_data(latitude, longitude, 2020, 2020, tilt, azimuth)
 
     # Save the data as a CSV file
@@ -214,7 +207,7 @@ def calculate_power_output():
 
     # Calculate angle of incidence and incidence angle modifier
     aoi = pvlib.irradiance.aoi(
-        surface_tilt, surface_azimuth, solarpos.apparent_zenith, solarpos.azimuth)
+        tilt, azimuth, solarpos.apparent_zenith, solarpos.azimuth)
     iam = pvlib.iam.ashrae(aoi)
 
     # Calculate effective irradiance
