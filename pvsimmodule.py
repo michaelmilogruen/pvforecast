@@ -20,6 +20,25 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import poadata
 
+# Define parameters
+start = '2020-01-01 00:00'
+end = '2020-12-31 23:00'
+latitude = 47.38770748541585
+longitude = 15.094127778561258
+tilt = 30
+azimuth = 149.716  # azimuth for SOUTH (pvlib = 180°, PVGIS = 0°)
+celltype = 'polycristalline'
+pdc0 = 240  # Nominal max. power in [W] (=Pmp)
+v_mp = 29.87  # Voltage at MP [V]
+i_mp = 8.04  # Current at MP [A]
+v_oc = 37.33  # Open-circuit voltage [V]
+i_sc = 8.78  # Short-circuit current [A]
+alpha_sc = 0.0041  # Temperature coefficient for i_sc [A/K]
+beta_voc = -0.114  # Temperature coefficient for v_oc [V/K]
+gamma_pdc = -0.405  # Temperature coefficient for pdc0 (Pmp) [%/K] (directly take procentual value --> V11)
+cells_in_series = 3 * 23
+temp_ref = 25  # Reference temperature [°C]
+
 # Define separate functions here
 def edit_excel(excel_file):
     """
@@ -296,7 +315,11 @@ def main():
     Main function to run the script.
     """
     # Call the separate functions here
-    calculate_power_output()
+    calculate_power_output(start, end, latitude, longitude,
+                           tilt, azimuth, celltype, pdc0,
+                           v_mp, i_mp, v_oc, i_sc,
+                           alpha_sc, beta_voc, gamma_pdc,
+                           cells_in_series, temp_ref)
     plot_results()
     edit_excel("results.xlsx")
 
