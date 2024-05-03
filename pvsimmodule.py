@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Author: Michael Grün
 Email: michaelgruen@hotmail.com
@@ -7,16 +8,17 @@ Version: 1.0
 Date: 2023-05-15
 """
 
+import os
 import pvlib
 from pvlib.modelchain import ModelChain
 from pvlib.location import Location
 from pvlib.pvsystem import PVSystem
 from pvlib.temperature import TEMPERATURE_MODEL_PARAMETERS
-import os
 import xlwings as xw
 import matplotlib.pyplot as plt
 import pandas as pd
 import poadata
+
 
 def edit_excel(excel_file):
     """
@@ -31,6 +33,10 @@ def edit_excel(excel_file):
     Args:
         excel_file (str): The path to the Excel file.
     """
+    # Check if the excel_file exists
+    if not os.path.exists(excel_file):
+        raise FileNotFoundError(f"Excel file '{excel_file}' does not exist.")
+
     # Open the specified Excel workbook
     wb = xw.Book(excel_file)
 
@@ -100,8 +106,6 @@ def edit_excel(excel_file):
         
         'COPY POWER AC FROM MODEL CHAIN RESULTS
         
-
-
         ' Set the source and target worksheets
         Set sourceWs = ThisWorkbook.Sheets("Model Chain Results")
         Set targetWs = ThisWorkbook.Sheets("RESULTS")
@@ -135,7 +139,6 @@ def edit_excel(excel_file):
          
         
     End Sub
-
     """
 
     # Add the VBA code to the workbook's VBProject
@@ -151,6 +154,7 @@ def edit_excel(excel_file):
 
     # Close the workbook
     wb.close()
+
 
 # Specifications from the data sheet: KPV_Datenblatt_PE_NEC_Power60_DE_NEU_20120315.pdf
 celltype = 'polycristalline'
@@ -294,4 +298,15 @@ plt.show()
 # # Adding a grid to the plot
 # plt.grid()
 # plt.show()
+
+
+def main():
+    """
+    Main function to run the script.
+    """
+    edit_excel("results.xlsx")
+
+
+if __name__ == '__main__':
+    main()
 
