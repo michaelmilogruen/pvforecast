@@ -5,7 +5,7 @@ Email: michaelgruen@hotmail.com
 Description: This script calculates the power output of a photovoltaic system
              using the PVLib library and processes the results in an Excel file.
 Version: 1.0
-Date: 2023-05-15
+Date: 2024-05-03
 """
 
 import os
@@ -24,6 +24,10 @@ from pvlib.pvsystem import PVSystem
 from pvlib.temperature import TEMPERATURE_MODEL_PARAMETERS
 import poadata
 import xlwings as xw
+from math import sin, cos, pi
+from datetime import datetime
+from datetime import timedelta
+import sys
 
 # Define parameters
 start = '2020-01-01 00:00'
@@ -44,6 +48,15 @@ gamma_pdc = -0.405  # Temperature coefficient for pdc0 (Pmp) [%/K] (directly tak
 cells_in_series = 3 * 23
 temp_ref = 25  # Reference temperature [°C]
 
+# Define some helper functions
+def get_weekday(date):
+    return date.weekday() + 1  # Excel weekday starts from 1
+
+def get_hour(date):
+    return date.hour
+
+def get_month(date):
+    return date.month
 
 def execute_vba_actions(file_name: str) -> None:
     """
@@ -93,6 +106,44 @@ def execute_vba_actions(file_name: str) -> None:
 
     # Autofit column G in 'Model Chain Results'
     model_chain_results.column_dimensions['G'].auto_size = True
+
+    worksheet = workbook['Model Chain Results']
+
+    # Define the start cell and date
+    start_cell = "A2"
+    start_date = datetime(2020, 1, 1)  # Adjust the start date as needed
+    row = worksheet[start_cell].row
+
+    # Iterate over the rows
+    start_row = worksheet[start_cell].row
+    for row_cells in worksheet.iter_rows(min_row=start_row, min_col=1):
+        # Inside the loop
+        date = start_date + timedelta(days=(row_cells[1].row - row))
+
+
+        # Calculate weekday
+        worksheet.cell(row=row_cells[1].row, column=17, value="Weekday")
+        worksheet.cell(row=row_cells[1].row, column=18, value=get_weekday(date))
+
+        # Calculate sin and cos of day
+        worksheet.cell(row=row_cells[1].row, column=19, value=sin(get_weekday(date) / 7 * 2 * pi))
+        worksheet.cell(row=row_cells[1].row, column=20, value=cos(get_weekday(date) / 7 * 2 * pi))
+
+        # Calculate hour
+        worksheet.cell(row=row_cells[1].row, column=21, value="hour")
+        worksheet.cell(row=row_cells[1].row, column=22, value=get_hour(date))
+
+        # Calculate sin and cos of hour
+        worksheet.cell(row=row_cells[1].row, column=23, value=sin(get_hour(date) / 24 * 2 * pi))
+        worksheet.cell(row=row_cells[1].row, column=24, value=cos(get_hour(date) / 24 * 2 * pi))
+
+        # Calculate month
+        worksheet.cell(row=row_cells[1].row, column=25, value="month")
+        worksheet.cell(row=row_cells[1].row, column=26, value=get_month(date))
+
+        # Calculate sin and cos of month
+        worksheet.cell(row=row_cells[1].row, column=27, value=sin(get_month(date) / 12 * 2 * pi))
+        worksheet.cell(row=row_cells[1].row, column=28, value=cos(get_month(date) / 12 * 2 * pi))
 
     # Save the modified workbook
     workbook.save(file_name)
@@ -261,6 +312,8 @@ def main():
     plot_results(ac_results)
     execute_vba_actions('results.xlsx')
 
+    return 0
+
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
