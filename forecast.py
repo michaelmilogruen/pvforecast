@@ -10,85 +10,115 @@ Date: 2024-05-04
 
 import json
 import pandas as pd
-
-f_ref_time = 1
-# -------------- format of fc_start_time and fc_end_time:  (YYYY-MM-DDThh:mm) -------------------- 
-fc_start_time = "2024-04-07T06:00"
-fc_end_time = "2024-04-09T06:00"
-
-#fc_start_time = float(input("Please input forecasting start time (YYYY-MM-DDThh:mm): ")) #e.g.: 2024-04-05T10:00
-#fc_end_time = float(input("Please input forecasting end time (YYYY-MM-DDThh:mm): ")) #e.g.: 2024-04-06T20:00
-
-# Latitude and lonfitude for Leoben EVT
-lat_lon = "47.38770748541585,15.094127778561258"
-
 import requests
 
-# URL of the JSON data
-#url = "https://dataset.api.hub.geosphere.at/v1/timeseries/forecast/nwp-v1-1h-2500m?lat_lon=47.38770748541585,15.094127778561258&parameters=grad&parameters=t2m&parameters=sundur_acc&parameters=v10m&start=2024-04-05T10:00&end=2024-04-06T20:00"
-url = "https://dataset.api.hub.geosphere.at/v1/timeseries/forecast/nwp-v1-1h-2500m?lat_lon="+lat_lon+"&parameters=grad&parameters=t2m&parameters=sundur_acc&parameters=v10m&start="+fc_start_time+"&end="+fc_end_time
+
+def get_user_input():
+    """
+    Get user input for forecasting start and end times.
+
+    Returns:
+        tuple: A tuple containing the forecasting start time and end time.
+    """
+    fc_start_time = input("Please input forecasting start time (YYYY-MM-DDThh:mm): ")
+    fc_end_time = input("Please input forecasting end time (YYYY-MM-DDThh:mm): ")
+    return fc_start_time, fc_end_time
 
 
-# Send request and get JSON data
-response = requests.get(url)
+def fetch_weather_data(lat_lon, fc_start_time, fc_end_time):
+    """
+    Fetch weather forecast data from the API.
 
-# Check if the request was successful (status code 200)
-if response.status_code == 200:
-    # Get the JSON data
-    data = response.json()
+    Args:
+        lat_lon (str): Latitude and longitude for the location.
+        fc_start_time (str): Forecasting start time in the format "YYYY-MM-DDThh:mm".
+        fc_end_time (str): Forecasting end time in the format "YYYY-MM-DDThh:mm".
 
-    # Specify the file path to save the JSON data
-    file_path = "weather_forecast.json"
+    Returns:
+        dict: The fetched weather forecast data as a dictionary.
+    """
+    url = f"https://dataset.api.hub.geosphere.at/v1/timeseries/forecast/nwp-v1-1h-2500m?lat_lon={lat_lon}¶meters=grad¶meters=t2m¶meters=sundur_acc¶meters=v10m&start={fc_start_time}&end={fc_end_time}"
+    response = requests.get(url)
 
-    # Write the JSON data to a file
-    with open(file_path, "w") as json_file:
-        json_file.write(response.text)
-
-    print("JSON data saved successfully.")
-else:
-    print(f"Failed to fetch data. Status code: {response.status_code}")
-    
-    
-
-with open('weather_forecast.json') as f:
-    data = json.load(f)
-
-# Use pd.json_normalize to convert the JSON to a DataFrame
-# df = pd.json_normalize(data['features'],
-#                     meta=['properties',['parameters',['grad','name'],['grad','unit'],['grad','data'],['t2m','name'], ['t2m','unit'], ['t2m', 'data']]])
-
-df = pd.json_normalize(data['features'],
-                    meta=['properties',['parameters']])
-                    
-time_list = data['timestamps']
-
-# Remodeling of the data to a dataframe 
-df1 = df[['properties.parameters.grad.data', 
-          'properties.parameters.t2m.data',
-          'properties.parameters.sundur_acc.data',
-          'properties.parameters.v10m.data']]
+    if response.status_code == 200:
+        data = response.json()
+        file_path = "weather_forecast.json"
+        with open(file_path, "w") as json_file:
+            json_file.write(response.text)
+        print("JSON data saved successfully.")
+        return data
+    else:
+        print(f"Failed to fetch data. Status code: {response.status_code}")
+        return None
 
 
-list1 = list(df1['properties.parameters.grad.data'][0]) #make a list with the stored data in the first field with the index 'properties.parameters.grad.data'
-list2 = list(df1['properties.parameters.t2m.data'][0])
-list3 = list(df1['properties.parameters.sundur_acc.data'][0])
-list4 = list(df1['properties.parameters.v10m.data'][0])
+def process_weather_data(data):
+    """
+    Process the fetched weather forecast data and create a DataFrame.
 
-# list1_neu = list1[0]
-# list2_neu = list2[0]
-# list3_neu = list3[0]
-# list4_neu = list4[0]
+    Args:
+        data (dict): The fetched weather forecast data.
 
-df2 = pd.DataFrame()
-df2['timestamp'] = time_list
-df2['surface global radiation [J/m²]'] = list1
-df2['Temperture 2m above ground [°C]'] = list2
-df2['sunshine duration accumulated [s]'] = list3
-df2['wind speed northern direction [m/s]'] = list4
+    Returns:
+        pandas.DataFrame: A DataFrame containing the processed weather data.
+    """
+    with open('weather_forecast.json') as f:
+        data = json.load(f)
 
-# Display the DataFrame df2
-print(df2)
+    df = pd.json_normalize(data['features'], meta=['properties', ['parameters']])
+    time_list = data['timestamps']
 
-#Export data from df to Excel-file
-with pd.ExcelWriter("forecast_data.xlsx") as writer: 
-    df2.to_excel(writer, sheet_name='Forecast_Data1')
+    df1 = df[['properties.parameters.grad.data',
+              'properties.parameters.t2m.data',
+              'properties.parameters.sundur_acc.data',
+              'properties.parameters.v10m.data']]
+
+    list1 = list(df1['properties.parameters.grad.data'][[1]])
+    list2 = list(df1['properties.parameters.t2m.data'][[1]])
+    list3 = list(df1['properties.parameters.sundur_acc.data'][[1]])
+    list4 = list(df1['properties.parameters.v10m.data'][[1]])
+
+    df2 = pd.DataFrame()
+    df2['timestamp'] = time_list
+    df2['surface global radiation [J/m²]'] = list1
+    df2['Temperture 2m above ground [°C]'] = list2
+    df2['sunshine duration accumulated [s]'] = list3
+    df2['wind speed northern direction [m/s]'] = list4
+
+    return df2
+
+
+def save_data_to_excel(df):
+    """
+    Save the processed weather data to an Excel file.
+
+    Args:
+        df (pandas.DataFrame): The DataFrame containing the processed weather data.
+    """
+    with pd.ExcelWriter("forecast_data.xlsx") as writer:
+        df.to_excel(writer, sheet_name='Forecast_Data1')
+    print("Data saved to Excel file successfully.")
+
+
+def main():
+    """
+    Main function to run the script.
+    """
+    f_ref_time = 1
+    lat_lon = "47.38770748541585,15.094127778561258"
+
+    # fc_start_time = "2024-04-07T06:00"
+    # fc_end_time = "2024-04-09T06:00"
+
+    fc_start_time, fc_end_time = get_user_input()
+
+    weather_data = fetch_weather_data(lat_lon, fc_start_time, fc_end_time)
+    if weather_data is not None:
+        df = process_weather_data(weather_data)
+        print(df)
+        save_data_to_excel(df)
+
+
+if __name__ == "__main__":
+    main()
+
