@@ -1,0 +1,147 @@
+<mxfile host="Electron" modified="2024-05-03T07:36:40.912Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/22.0.3 Chrome/114.0.5735.289 Electron/25.8.4 Safari/537.36" etag="xYktJH0kd1RrKaETX4Xm" version="22.0.3" type="device">
+  <diagram name="Seite-1" id="H98hityXu-fGP8pQlYcv">
+    <mxGraphModel dx="1485" dy="941" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-10" value="pvsimmodule" style="swimlane;childLayout=stackLayout;horizontal=1;startSize=50;horizontalStack=0;rounded=1;fontSize=14;fontStyle=0;strokeWidth=2;resizeParent=0;resizeLast=1;shadow=0;dashed=0;align=center;arcSize=4;whiteSpace=wrap;html=1;fillColor=#CCFFCC;" vertex="1" parent="1">
+          <mxGeometry x="190" y="160" width="160" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-11" value="this script simulates the PV.&lt;br&gt;Poadata is included in&amp;nbsp;&lt;br&gt;pvsimmodule" style="align=left;strokeColor=none;fillColor=#CCFFCC;spacingLeft=4;fontSize=12;verticalAlign=top;resizable=0;rotatable=0;part=1;html=1;" vertex="1" parent="tB-vyTh3bbZ4SWaP3QIk-10">
+          <mxGeometry y="50" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-18" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fillColor=#CCFFCC;" edge="1" parent="1" source="tB-vyTh3bbZ4SWaP3QIk-13" target="tB-vyTh3bbZ4SWaP3QIk-11">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-13" value="poadata" style="swimlane;childLayout=stackLayout;horizontal=1;startSize=50;horizontalStack=0;rounded=1;fontSize=14;fontStyle=0;strokeWidth=2;resizeParent=0;resizeLast=1;shadow=0;dashed=0;align=center;arcSize=4;whiteSpace=wrap;html=1;fillColor=#CCFFCC;" vertex="1" parent="1">
+          <mxGeometry x="190" y="310" width="160" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-14" value="this script fetches data&amp;nbsp;&lt;br&gt;from PVGIS database." style="align=left;strokeColor=none;fillColor=#CCFFCC;spacingLeft=4;fontSize=12;verticalAlign=top;resizable=0;rotatable=0;part=1;html=1;" vertex="1" parent="tB-vyTh3bbZ4SWaP3QIk-13">
+          <mxGeometry y="50" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-16" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fillColor=#CCFFCC;" edge="1" parent="1" source="tB-vyTh3bbZ4SWaP3QIk-15" target="tB-vyTh3bbZ4SWaP3QIk-14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-15" value="PVGIS" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;align=center;fillColor=#CCFFCC;" vertex="1" parent="1">
+          <mxGeometry x="185" y="490" width="170" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-19" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.25;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="tB-vyTh3bbZ4SWaP3QIk-11" target="tB-vyTh3bbZ4SWaP3QIk-24">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="470" y="228" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-20" value="run" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fillColor=#CCFFCC;" vertex="1" connectable="0" parent="tB-vyTh3bbZ4SWaP3QIk-19">
+          <mxGeometry x="-0.033" y="-1" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-24" value="results.xlsx" style="swimlane;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="576" y="159" width="244" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-26" value="time" style="swimlane;whiteSpace=wrap;html=1;" vertex="1" parent="tB-vyTh3bbZ4SWaP3QIk-24">
+          <mxGeometry x="4" y="36.5" width="56" height="84.5" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-27" value="00:00&lt;br&gt;01:00&lt;br&gt;02:00" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="tB-vyTh3bbZ4SWaP3QIk-26">
+          <mxGeometry x="3" y="14.5" width="50" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-28" value="Power_ac" style="swimlane;whiteSpace=wrap;html=1;" vertex="1" parent="tB-vyTh3bbZ4SWaP3QIk-24">
+          <mxGeometry x="60" y="36.5" width="70" height="84.5" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-32" value="&lt;div style=&quot;border-color: var(--border-color);&quot;&gt;-6,012&lt;/div&gt;&lt;div style=&quot;border-color: var(--border-color);&quot;&gt;-6,012&lt;/div&gt;&lt;div style=&quot;border-color: var(--border-color);&quot;&gt;-6,012&lt;/div&gt;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="tB-vyTh3bbZ4SWaP3QIk-28">
+          <mxGeometry x="10" y="14.5" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-33" value="Cell T" style="swimlane;whiteSpace=wrap;html=1;" vertex="1" parent="tB-vyTh3bbZ4SWaP3QIk-24">
+          <mxGeometry x="130" y="36.5" width="110" height="84.5" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-42" value="&lt;div style=&quot;border-color: var(--border-color);&quot;&gt;&lt;div style=&quot;border-color: var(--border-color); text-align: left;&quot;&gt;-3,74&lt;/div&gt;&lt;div style=&quot;border-color: var(--border-color); text-align: left;&quot;&gt;-3,33&lt;/div&gt;&lt;div style=&quot;border-color: var(--border-color); text-align: left;&quot;&gt;-3,74&lt;/div&gt;&lt;/div&gt;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="tB-vyTh3bbZ4SWaP3QIk-33">
+          <mxGeometry x="30" y="20.5" width="50" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-37" value="LSTM" style="swimlane;childLayout=stackLayout;horizontal=1;startSize=50;horizontalStack=0;rounded=1;fontSize=14;fontStyle=0;strokeWidth=2;resizeParent=0;resizeLast=1;shadow=0;dashed=0;align=center;arcSize=4;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="968" y="180" width="160" height="134" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-38" value="This script uses a deep&amp;nbsp;&lt;br&gt;learning method to develope&lt;br&gt;a model is able to predict&amp;nbsp;&lt;br&gt;power based on Temperature&lt;br&gt;and irradiance." style="align=left;strokeColor=none;fillColor=none;spacingLeft=4;fontSize=12;verticalAlign=top;resizable=0;rotatable=0;part=1;html=1;" vertex="1" parent="tB-vyTh3bbZ4SWaP3QIk-37">
+          <mxGeometry y="50" width="160" height="84" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-39" value="data for one year" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="635" y="276" width="130" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-41" value="" style="endArrow=classic;html=1;rounded=0;entryX=-0.004;entryY=0.365;entryDx=0;entryDy=0;entryPerimeter=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" parent="1" source="tB-vyTh3bbZ4SWaP3QIk-24" target="tB-vyTh3bbZ4SWaP3QIk-37">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="877.6627318718381" y="390" as="sourcePoint" />
+            <mxPoint x="880" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-43" value="&lt;h1&gt;&lt;b&gt;Simulation&lt;/b&gt;&lt;/h1&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="240" y="50" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-45" value="&lt;h1&gt;&lt;b&gt;Deep Learning&lt;/b&gt;&lt;/h1&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="50" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-46" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="350" y="70" as="sourcePoint" />
+            <mxPoint x="940" y="70" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-51" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.875;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0;entryY=0.25;entryDx=0;entryDy=0;" edge="1" parent="1" source="tB-vyTh3bbZ4SWaP3QIk-47" target="tB-vyTh3bbZ4SWaP3QIk-50">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-47" value="Geospher API" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="615" y="372" width="170" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-58" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="tB-vyTh3bbZ4SWaP3QIk-49">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1048" y="580" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-49" value="Forecast" style="swimlane;childLayout=stackLayout;horizontal=1;startSize=50;horizontalStack=0;rounded=1;fontSize=14;fontStyle=0;strokeWidth=2;resizeParent=0;resizeLast=1;shadow=0;dashed=0;align=center;arcSize=4;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="968" y="366" width="160" height="134" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-50" value="This script uses the LSTM&amp;nbsp;&lt;br&gt;model and weather forecast&lt;br&gt;data to predict PV loads." style="align=left;strokeColor=none;fillColor=none;spacingLeft=4;fontSize=12;verticalAlign=top;resizable=0;rotatable=0;part=1;html=1;" vertex="1" parent="tB-vyTh3bbZ4SWaP3QIk-49">
+          <mxGeometry y="50" width="160" height="84" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-52" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="tB-vyTh3bbZ4SWaP3QIk-38" target="tB-vyTh3bbZ4SWaP3QIk-49">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1048" y="370" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-53" value="Historical&amp;nbsp;&lt;br&gt;weather data" style="text;html=1;strokeColor=none;fillColor=#CCFFCC;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="370" y="540" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-54" value="Forecast&lt;br&gt;weather data" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="670" y="510" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-59" value="pvloadforecast.xlsx" style="swimlane;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="926" y="585" width="244" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-60" value="time" style="swimlane;whiteSpace=wrap;html=1;" vertex="1" parent="tB-vyTh3bbZ4SWaP3QIk-59">
+          <mxGeometry x="44" y="36.5" width="53" height="84.5" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-61" value="00:00&lt;br&gt;01:00&lt;br&gt;02:00" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="tB-vyTh3bbZ4SWaP3QIk-60">
+          <mxGeometry y="14.5" width="50" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-62" value="Power_ac" style="swimlane;whiteSpace=wrap;html=1;" vertex="1" parent="tB-vyTh3bbZ4SWaP3QIk-59">
+          <mxGeometry x="97" y="36.5" width="70" height="84.5" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-63" value="&lt;div style=&quot;border-color: var(--border-color);&quot;&gt;2565&lt;br&gt;2686&lt;/div&gt;&lt;div style=&quot;border-color: var(--border-color);&quot;&gt;3112&lt;/div&gt;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="tB-vyTh3bbZ4SWaP3QIk-62">
+          <mxGeometry x="15" y="14.5" width="50" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-66" value="" style="shape=curlyBracket;whiteSpace=wrap;html=1;rounded=1;labelPosition=left;verticalLabelPosition=middle;align=right;verticalAlign=middle;rotation=-90;" vertex="1" parent="1">
+          <mxGeometry x="689" y="185" width="18" height="244" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-67" value="LSTM needs data in specific format" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="585" y="308" width="210" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-70" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="tB-vyTh3bbZ4SWaP3QIk-68" target="tB-vyTh3bbZ4SWaP3QIk-69">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-68" value="&lt;b&gt;&lt;font style=&quot;font-size: 15px;&quot;&gt;circular encoding&lt;/font&gt;&lt;/b&gt;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="623" y="338" width="150" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="tB-vyTh3bbZ4SWaP3QIk-69" value="&#xa;&lt;span style=&quot;color: rgb(10, 10, 10); font-family: Inter; font-size: 14px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 400; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; background-color: rgb(255, 255, 255); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial; float: none; display: inline !important;&quot;&gt;Circular encoding is a technique to represent cyclical or periodic features in machine learning models by converting them into sine and cosine values, preserving their cyclical nature and allowing the model to better capture and generalize periodic patterns.&lt;/span&gt;&#xa;&#xa;" style="whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="470" y="429" width="140" height="221" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
