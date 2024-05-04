@@ -13,6 +13,9 @@ import pandas as pd
 import requests
 from datetime import datetime, timedelta
 
+# Latitude and lonfitude for Leoben EVT
+lat_lon = "47.38770748541585,15.094127778561258"
+
 def get_user_input(hours: int) -> tuple:
     """
     Get user input for forecasting start and end times.
@@ -110,9 +113,6 @@ def main():
     """
     Main function to run the script.
     """
-    f_ref_time = 1
-    lat_lon = "47.38770748541585,15.094127778561258"
-
 
 
     fc_start_time, fc_end_time = get_user_input(24)
