@@ -2,8 +2,8 @@
 """
 Author: Michael Grün
 Email: michaelgruen@hotmail.com
-Description: This script calculates the power output of a photovoltaic system
-             using the PVLib library and processes the results in an Excel file.
+Description: This script fetches weather forecast data from an API and processes it to create an Excel file
+             with the forecast data for a specified number of hours.
 Version: 1.0
 Date: 2024-05-04
 """
@@ -11,17 +11,23 @@ Date: 2024-05-04
 import json
 import pandas as pd
 import requests
+from datetime import datetime, timedelta
 
-
-def get_user_input():
+def get_user_input(hours: int) -> tuple:
     """
     Get user input for forecasting start and end times.
+
+    Args:
+        hours (int): The number of hours to forecast.
 
     Returns:
         tuple: A tuple containing the forecasting start time and end time.
     """
-    fc_start_time = input("Please input forecasting start time (YYYY-MM-DDThh:mm): ")
-    fc_end_time = input("Please input forecasting end time (YYYY-MM-DDThh:mm): ")
+    current_time = datetime.now().replace(minute=0, second=0, microsecond=0)
+    
+    fc_start_time = current_time.strftime("%Y-%m-%dT%H:%M")
+    fc_end_time = (current_time + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M")
+    
     return fc_start_time, fc_end_time
 
 
@@ -37,7 +43,7 @@ def fetch_weather_data(lat_lon, fc_start_time, fc_end_time):
     Returns:
         dict: The fetched weather forecast data as a dictionary.
     """
-    url = f"https://dataset.api.hub.geosphere.at/v1/timeseries/forecast/nwp-v1-1h-2500m?lat_lon={lat_lon}¶meters=grad¶meters=t2m¶meters=sundur_acc¶meters=v10m&start={fc_start_time}&end={fc_end_time}"
+    url = f"https://dataset.api.hub.geosphere.at/v1/timeseries/forecast/nwp-v1-1h-2500m?lat_lon={lat_lon}&parameters=grad&parameters=t2m&parameters=sundur_acc&parameters=v10m&start={fc_start_time}&end={fc_end_time}"
     response = requests.get(url)
 
     if response.status_code == 200:
@@ -73,10 +79,10 @@ def process_weather_data(data):
               'properties.parameters.sundur_acc.data',
               'properties.parameters.v10m.data']]
 
-    list1 = list(df1['properties.parameters.grad.data'][[1]])
-    list2 = list(df1['properties.parameters.t2m.data'][[1]])
-    list3 = list(df1['properties.parameters.sundur_acc.data'][[1]])
-    list4 = list(df1['properties.parameters.v10m.data'][[1]])
+    list1 = list(df1['properties.parameters.grad.data'][0])
+    list2 = list(df1['properties.parameters.t2m.data'][0])
+    list3 = list(df1['properties.parameters.sundur_acc.data'][0])
+    list4 = list(df1['properties.parameters.v10m.data'][0])
 
     df2 = pd.DataFrame()
     df2['timestamp'] = time_list
@@ -107,10 +113,9 @@ def main():
     f_ref_time = 1
     lat_lon = "47.38770748541585,15.094127778561258"
 
-    # fc_start_time = "2024-04-07T06:00"
-    # fc_end_time = "2024-04-09T06:00"
 
-    fc_start_time, fc_end_time = get_user_input()
+
+    fc_start_time, fc_end_time = get_user_input(24)
 
     weather_data = fetch_weather_data(lat_lon, fc_start_time, fc_end_time)
     if weather_data is not None:
