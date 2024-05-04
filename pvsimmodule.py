@@ -286,7 +286,7 @@ def plot_results(ac_results: pd.DataFrame, figsize=(16, 9)):
         plt.savefig("energy_yield_start_to_end.png")
 
         # Plotting the results - Energy yield over one year - monthly sum
-        monthly_sum = ac_results.resample('M').sum()
+        monthly_sum = ac_results.resample('ME').sum()
         monthly_sum.plot(figsize=figsize)
         plt.title("AC Power - PVSystem (Monthly Sum)")
         plt.xlabel("Time")
