@@ -166,7 +166,7 @@ def main():
     Main function to run the EV load prediction and analysis.
     """
     # Load data
-    data = pd.read_excel(r"C:\Users\AFayyaz Bakhsh\Downloads\PV.xlsx")
+    data = pd.read_excel("PV.xlsx")
 
     # Preprocess data
     test_dates = pd.to_datetime(['2020-12-23', '2020-12-24', '2020-12-25', '2020-12-26', '2020-12-27', '2020-12-28', '2020-12-29'])
@@ -196,7 +196,7 @@ def main():
     x_test, y_test = X[test_i], y[test_i]
 
     # Build LSTM model
-    model = build_lstm_model(x_train.shape[[1]], x_train.shape[[2]])
+    model = build_lstm_model(x_train.shape[1], x_train.shape[2])
     early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
     model.fit(x_train, y_train, validation_data=(x_test, y_test), callbacks=[early_stopping], verbose=1)
 
