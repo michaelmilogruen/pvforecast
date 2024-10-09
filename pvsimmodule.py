@@ -277,28 +277,48 @@ def plot_results(ac_results: pd.DataFrame, figsize=(16, 9)):
         figsize (tuple, optional): The figure size. Defaults to (16, 9).
     """
     try:
+        # Ensure ac_results has a datetime index for resampling
+        if not isinstance(ac_results.index, pd.DatetimeIndex):
+            raise ValueError("The DataFrame index must be a DatetimeIndex.")
+
         # Plotting the results - Energy yield from start to end
-        ac_results.plot(figsize=figsize)
-        plt.title("AC Power - PVSystem")
-        plt.xlabel("Time")
-        plt.ylabel("Energy Yield")
-        plt.grid(True)
-        plt.savefig("energy_yield_start_to_end.png")
+        plt.figure(figsize=figsize)
+        plt.plot(ac_results.index, ac_results, label='AC Power Output', color='b', linewidth=1.5)
+        plt.title("AC Power - PVSystem (Complete Time Series)", fontsize=16)
+        plt.xlabel("Time", fontsize=14)
+        plt.ylabel("Energy Yield (kWh)", fontsize=14)
+        plt.grid(True, linestyle='--', linewidth=0.5)
+        plt.legend()
+        plt.tight_layout()
+        plt.gca().set_xlim(left=ac_results.index.min(), right=ac_results.index.max())
+        plt.gca().set_ylim(bottom=0)
+        plt.savefig("energy_yield_start_to_end.png", dpi=300)
+        plt.show()
 
         # Plotting the results - Energy yield over one year - monthly sum
-        monthly_sum = ac_results.resample('ME').sum()
-        monthly_sum.plot(figsize=figsize)
-        plt.title("AC Power - PVSystem (Monthly Sum)")
-        plt.xlabel("Time")
-        plt.ylabel("Energy Yield")
-        plt.grid(True)
-        plt.savefig("energy_yield_monthly_sum.png")
+        monthly_sum = ac_results.resample('M').sum()
+        plt.figure(figsize=figsize)
+        bars = plt.bar(monthly_sum.index, monthly_sum.values.flatten(), color='orange', alpha=0.7, width=20)
+        plt.title("AC Power - PVSystem (Monthly Sum)", fontsize=16)
+        plt.xlabel("Month", fontsize=14)
+        plt.ylabel("Monthly Energy Yield (kWh)", fontsize=14)
+        plt.grid(True, linestyle='--', linewidth=0.5)
+        plt.xticks(monthly_sum.index, monthly_sum.index.strftime('%b %Y'), rotation=45)
+        plt.gca().set_xlim(left=monthly_sum.index.min() - pd.Timedelta(days=15),
+                           right=monthly_sum.index.max() + pd.Timedelta(days=15))
+        plt.gca().set_ylim(bottom=0)
 
+        # Adding labels to each bar in scientific notation with a maximum of 7 digits
+        for bar in bars:
+            plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 10, f'{bar.get_height():.2e}',
+                     ha='center', va='bottom', fontsize=10, color='black')
+
+        plt.tight_layout()
+        plt.savefig("energy_yield_monthly_sum.png", dpi=300)
         plt.show()
+
     except (TypeError, ValueError) as e:
         print(f"An error occurred: {e}")
-
-
 def main():
     """
     Main function to run the script.
