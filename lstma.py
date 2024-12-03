@@ -32,11 +32,13 @@ def create_sequences(features, target, seq_length=24):
 # 3. Build LSTM model
 def build_model(seq_length, n_features, learning_rate=0.001):
     model = Sequential([
-        LSTM(96, return_sequences=True, input_shape=(seq_length, n_features)),
+        LSTM(128, return_sequences=True, input_shape=(seq_length, n_features)),
         Dropout(0.2),
-        LSTM(48, return_sequences=False),
+        LSTM(48, return_sequences=True),
         Dropout(0.2),
-        Dense(24, activation='relu'),
+        LSTM(24, return_sequences=False),
+        Dropout(0.2),
+        Dense(16, activation='relu'),
         Dense(1)
     ])
     
