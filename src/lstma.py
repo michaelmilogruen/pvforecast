@@ -9,11 +9,12 @@ from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 import matplotlib.pyplot as plt
+from .utils import get_data_path, get_model_path
 
 # 1. Load and prepare the training data
 def load_training_data(file_path):
     # Read CSV with first row as headers
-    df = pd.read_csv(file_path)
+    df = pd.read_csv(get_data_path('merged_results.csv', 'processed'))
     
     # Extract relevant features and target
     features = df[['temp_air', 'wind_speed', 'poa_global']]  # Using correct column names from your data
@@ -50,7 +51,7 @@ def build_model(seq_length, n_features, learning_rate=0.001):
 # Main execution
 def main():
     # Load and prepare data
-    features, target = load_training_data('merged_results.csv')
+    features, target = load_training_data(get_data_path('merged_results.csv', 'processed'))
     
     # Scale the data
     feature_scaler = MinMaxScaler()
@@ -86,7 +87,7 @@ def main():
     )
     
     model_checkpoint = ModelCheckpoint(
-        'best_model.keras',
+        get_model_path('best_model.keras'),
         monitor='val_loss',
         save_best_only=True,
         verbose=1
@@ -103,7 +104,7 @@ def main():
     )
     
     # Load the best model
-    model = tf.keras.models.load_model('best_model.keras')
+    model = tf.keras.models.load_model(get_model_path('best_model.keras'))
     
     # Plot training history
     plt.figure(figsize=(12, 6))
@@ -155,8 +156,8 @@ def main():
     plt.tight_layout()
     plt.show()
     
-    # Save the model and scalers
-    model.save('power_forecast_model.keras')
+    # Save the model
+    model.save(get_model_path('power_forecast_model.keras'))
     
     return model, feature_scaler, target_scaler
 

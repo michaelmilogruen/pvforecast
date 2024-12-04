@@ -14,9 +14,10 @@ from tensorflow.keras.models import load_model
 import requests
 import json
 from datetime import datetime
+from .utils import get_model_path
 
 # Load the saved model and scalers
-model = load_model('final_model.h5', compile=False)
+model = load_model(get_model_path('final_model.h5'), compile=False)
 sc_x = joblib.load('scaler_x.pkl')
 sc_y = joblib.load('scaler_y.pkl')
 

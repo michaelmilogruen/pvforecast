@@ -20,9 +20,10 @@ import pvlib
 from openpyxl.utils import get_column_letter
 from pvlib.location import Location
 from pvlib.pvsystem import PVSystem
-import poadata
+from . import poadata
 from datetime import datetime, timedelta
 import sys
+from .utils import get_data_path, get_output_path
 
 # Define parameters
 PARAMS = {
@@ -99,8 +100,8 @@ def calculate_power_output(params: dict) -> Tuple[pd.DataFrame, pd.DataFrame]:
                         tz='Europe/Vienna', altitude=547.6, name='EVT')
 
     poa_data_2020 = poadata.get_pvgis_data(params['latitude'], params['longitude'], 2020, 2020, params['tilt'], params['azimuth'])
-    poa_data_2020.to_csv("poa_data_2020_Leoben_EVT_io.csv")
-    poa_data_2020 = pd.read_csv('poa_data_2020_Leoben_EVT_io.csv', index_col=0)
+    poa_data_2020.to_csv(get_data_path('poa_data_2020_Leoben_EVT_io.csv'))
+    poa_data_2020 = pd.read_csv(get_data_path('poa_data_2020_Leoben_EVT_io.csv'), index_col=0)
     poa_data_2020.index = pd.date_range(start='2020-01-01 00:00', periods=len(poa_data_2020.index), freq="h")
     poa_data = poa_data_2020[params['start']:params['end']]
 
@@ -130,7 +131,7 @@ def calculate_power_output(params: dict) -> Tuple[pd.DataFrame, pd.DataFrame]:
     results_df = pd.concat([ac_results, dc_scaled.i_mp, dc_scaled.v_mp, dc_scaled.p_mp, temp_cell], axis=1)
     results_df.columns = ['AC Power', 'DC scaled I_mp', 'DC scaled V_mp', 'DC scaled P_mp', 'Cell Temperature']
 
-    with pd.ExcelWriter("results.xlsx") as writer:
+    with pd.ExcelWriter(get_data_path('results.xlsx')) as writer:
         results_df.to_excel(writer, sheet_name='Model Chain Results')
         poa_data_2020.to_excel(writer, sheet_name='POA Data')
 
@@ -152,7 +153,7 @@ def plot_results(ac_results: pd.DataFrame) -> None:
     plt.xlabel("Time")
     plt.ylabel("Energy Yield")
     plt.grid(True)
-    plt.savefig("energy_yield_start_to_end.png")
+    plt.savefig(get_output_path('energy_yield_start_to_end.png'))
     plt.show()
 
     monthly_sum = ac_results.resample('M').sum()
@@ -161,7 +162,7 @@ def plot_results(ac_results: pd.DataFrame) -> None:
     plt.xlabel("Time")
     plt.ylabel("Energy Yield")
     plt.grid(True)
-    plt.savefig("energy_yield_monthly_sum.png")
+    plt.savefig(get_output_path('energy_yield_monthly_sum.png'))
     plt.show()
 
 
@@ -174,7 +175,7 @@ def main() -> int:
     """
     ac_results, poa_data_2020 = calculate_power_output(PARAMS)
     plot_results(ac_results)
-    execute_vba_actions('results.xlsx')
+    execute_vba_actions(get_data_path('results.xlsx'))
     return 0
 
 
