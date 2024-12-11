@@ -49,14 +49,12 @@ The project consists of three main components that work in sequence:
 ## Installation
 
 1. Clone the repository:
-
 ```bash
-git clone https://git.unileoben.ac.at/m01601214/pvforecast.git
+git clone https://github.com/michaelmilogruen/pvforecast.git
 cd pvforecast
 ```
 
 2. Install required packages:
-
 ```bash
 pip install -r requirements.txt
 ```
@@ -140,7 +138,8 @@ The system generates several output files:
 
 ## Authors
 
-- Michael Grün (michaelgruen@hotmail.com)
+- Michael Grün (https://github.com/michaelmilogruen)
+- Repository: https://github.com/michaelmilogruen/pvforecast
 
 ## License
 
