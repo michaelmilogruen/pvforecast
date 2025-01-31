@@ -14,6 +14,8 @@ from tensorflow.keras.models import load_model
 import requests
 import json
 from datetime import datetime
+import csv
+from lstma import predict_power
 
 # Load the saved model and scalers
 model = load_model('final_model.h5', compile=False)
@@ -30,7 +32,7 @@ def fetch_weather_data():
     lat_lon = "47.38770748541585,15.094127778561258"
     current_time = datetime.now().replace(minute=0, second=0, microsecond=0)
     fc_start_time = current_time.strftime("%Y-%m-%dT%H:%M")
-    fc_end_time = (current_time + pd.Timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M")
+    fc_end_time = (current_time + pd.Timedelta(hours=36)).strftime("%Y-%m-%dT%H:%M")
 
     url = f"https://dataset.api.hub.geosphere.at/v1/timeseries/forecast/nwp-v1-1h-2500m?lat_lon={lat_lon}&parameters=grad&parameters=t2m&parameters=sundur_acc&parameters=v10m&start={fc_start_time}&end={fc_end_time}"
     response = requests.get(url)
@@ -58,19 +60,17 @@ def process_weather_data(data):
 
     # Calculate global irradiation difference and scale to J/(m²*s)
     global_irradiation = [(parameters['grad']['data'][i + 1] - val) / 3600 for i, val in enumerate(parameters['grad']['data'][:-1])]
-
-    # Add a placeholder value for the first global_irradiation to match the length of other data
     global_irradiation.insert(0, 0)  # Adding 0 as a placeholder
 
-    # Create DataFrame ensuring all arrays have the same length
+    # Create DataFrame with renamed column to match training data
     new_data = pd.DataFrame({
         'timestamp': pd.to_datetime(time_list),
         'temp_air': parameters['t2m']['data'],
         'wind_speed': np.abs(parameters['v10m']['data']),
-        'global_irradiation': global_irradiation
+        'poa_global': global_irradiation  # Changed from 'global_irradiation' to 'poa_global'
     })
 
-    # Extract hour and month features from the timestamp and apply circular encoding
+    # Extract hour and month features
     new_data['hour'] = new_data['timestamp'].dt.hour
     new_data['sin_hour'] = np.sin(2 * np.pi * new_data['hour'] / 24.0)
     new_data['cos_hour'] = np.cos(2 * np.pi * new_data['hour'] / 24.0)
@@ -80,47 +80,74 @@ def process_weather_data(data):
 
     return new_data
 
+def export_to_csv(data, filename='forecast_data.csv'):
+    # Assuming 'data' is a list of dictionaries
+    if not data:
+        print("No data to export.")
+        return
+
+    # Extract field names from the first dictionary
+    fieldnames = data[0].keys()
+
+    # Write data to CSV
+    with open(filename, mode='w', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(data)
+
+    print(f"Data exported to {filename}")
+
 def main():
     """
     Main function to fetch weather data, process it, and predict power output for the next day.
     """
+    # Load model and scalers
+    model = load_model('best_model.keras')
+    feature_scaler = joblib.load('feature_scaler.save')
+    target_scaler = joblib.load('target_scaler.save')
+
     weather_data = fetch_weather_data()
     if weather_data is not None:
         new_data = process_weather_data(weather_data)
 
-        # Define features to be used for prediction
-        features = ['sin_hour', 'cos_hour', 'sin_month', 'cos_month', 'temp_air', 'wind_speed', 'global_irradiation']
+        # Update features list to use poa_global instead of global_irradiation
+        features = ['temp_air', 'wind_speed', 'poa_global']
 
-        # Iterate over 24 hours and predict power for each hour separately
-        predicted_powers = []
-        for i in range(24):
-            # Get features for each hour
-            X_new = new_data[features].iloc[i].values.reshape(1, -1)
-
-            # Scale the features using the loaded scaler
-            X_new_scaled = sc_x.transform(X_new)
-
-            # Reshape the data to fit the model's expected input shape (1, n_steps, n_features)
-            X_new_scaled = X_new_scaled.reshape((1, 1, len(features)))
-
-            # Make predictions using the loaded model
-            prediction = model.predict(X_new_scaled)
-
-            # Inverse transform the predicted value to get the actual power output
-            predicted_power = sc_y.inverse_transform(prediction)
-            predicted_powers.append(predicted_power[0][0])
+        # Use the predict_power function with all required arguments
+        predicted_powers = predict_power(model, feature_scaler, target_scaler, new_data[features])
 
         # Print the results to the console
-        print("Predicted AC Power for the next day (in W):")
+        print("Predicted AC Power for the next 24 hours (in W):")
         print("| {:<20} | {:<15} | {:<15} | {:<15} | {:<25} |".format('Time', 'Power (W)', 'Temp (°C)', 'Wind Speed (m/s)', 'Global Irradiation (J/(m²*s))'))
         print("|" + "-" * 102 + "|")
         print("-" * 90)
-        for i, power in enumerate(predicted_powers):
+        for i, power in enumerate(predicted_powers[:24]):  # Changed to 24 hours
             future_time = (datetime.now() + pd.Timedelta(hours=i)).strftime("%Y-%m-%d %H:%M")
             temp_air = new_data['temp_air'].iloc[i]
             wind_speed = new_data['wind_speed'].iloc[i]
-            global_irradiation = new_data['global_irradiation'].iloc[i]
-            print("|  {:<18} |  {:<15.2f} |  {:<15.2f} |  {:<15.2f} |  {:<25.2f} |".format(future_time, power * 1000, temp_air, wind_speed, global_irradiation))
+            global_irradiation = new_data['poa_global'].iloc[i]
+            
+            # Set power to zero if global irradiation is zero
+            if global_irradiation == 0:
+                power[0] = 0
+            
+            print("|  {:<18} |  {:<15.2f} |  {:<15.2f} |  {:<15.2f} |  {:<25.2f} |".format(
+                future_time, power[0], temp_air, wind_speed, global_irradiation))
+
+        # Create a list of dictionaries for export
+        export_data = []
+        for i, power in enumerate(predicted_powers[:24]):  # Changed to 24 hours
+            future_time = (datetime.now() + pd.Timedelta(hours=i)).strftime("%Y-%m-%d %H:%M")
+            export_data.append({
+                'timestamp': future_time,
+                'power_w': power[0] if new_data['poa_global'].iloc[i] != 0 else 0,  # Set to zero if irradiation is zero
+                'temperature_c': new_data['temp_air'].iloc[i],
+                'wind_speed_ms': new_data['wind_speed'].iloc[i],
+                'global_irradiation': new_data['poa_global'].iloc[i]
+            })
+
+        # Export the data
+        export_to_csv(export_data)
 
 if __name__ == "__main__":
     main()

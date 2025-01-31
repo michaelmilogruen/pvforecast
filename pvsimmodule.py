@@ -23,6 +23,9 @@ from pvlib.pvsystem import PVSystem
 import poadata
 from datetime import datetime, timedelta
 import sys
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
+
 
 # Define parameters
 PARAMS = {
@@ -59,9 +62,11 @@ def get_date_attributes(date: datetime) -> Tuple[int, int, int]:
     return date.weekday() + 1, date.hour, date.month
 
 
+
 def execute_vba_actions(file_name: str) -> None:
     """
     Execute various VBA-like actions on an Excel file to format and adjust column widths.
+    Also, copy columns B:J from 'POA Data' to 'Model Chain Results' starting at column H.
 
     Args:
         file_name (str): The name of the Excel file to be processed.
@@ -69,20 +74,26 @@ def execute_vba_actions(file_name: str) -> None:
     Returns:
         None
     """
-    workbook = openpyxl.load_workbook(file_name)
+    workbook = load_workbook(file_name)
     model_chain_results = workbook['Model Chain Results']
     poa_data = workbook['POA Data']
 
     # Autofit all columns in 'Model Chain Results' and 'POA Data'
     for worksheet in [model_chain_results, poa_data]:
         for column in worksheet.columns:
-            max_length = max(len(str(cell.value)) for cell in column)
+            max_length = max(len(str(cell.value)) for cell in column if cell.value is not None)
             adjusted_width = (max_length + 2) * 1.2
             column_letter = get_column_letter(column[0].column)
             worksheet.column_dimensions[column_letter].width = adjusted_width
 
+    # Copy columns B:J from 'POA Data' to 'Model Chain Results' starting at column H
+    for col_idx, source_col in enumerate(range(2, 11), start=8):  # B:J -> H onwards
+        for row_idx, cell in enumerate(poa_data.iter_rows(min_row=1, min_col=source_col, max_col=source_col), start=1):
+            model_chain_results.cell(row=row_idx, column=col_idx, value=cell[0].value)
+
     # Save the modified workbook
     workbook.save(file_name)
+
 
 
 def calculate_power_output(params: dict) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -130,9 +141,14 @@ def calculate_power_output(params: dict) -> Tuple[pd.DataFrame, pd.DataFrame]:
     results_df = pd.concat([ac_results, dc_scaled.i_mp, dc_scaled.v_mp, dc_scaled.p_mp, temp_cell], axis=1)
     results_df.columns = ['AC Power', 'DC scaled I_mp', 'DC scaled V_mp', 'DC scaled P_mp', 'Cell Temperature']
 
+    # Save as Excel
     with pd.ExcelWriter("results.xlsx") as writer:
         results_df.to_excel(writer, sheet_name='Model Chain Results')
         poa_data_2020.to_excel(writer, sheet_name='POA Data')
+
+    # Merge datasets and save as CSV
+    merged_df = pd.concat([results_df, poa_data_2020], axis=1)
+    merged_df.to_csv("merged_results.csv")
 
     return ac_results, poa_data_2020
 
