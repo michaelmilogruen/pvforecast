@@ -6,7 +6,7 @@
 
 Advanced photovoltaic power generation forecasting system utilizing deep learning and weather data integration.
 
-📚 **[Read our Project Paper](docs/Forecasting_PV_Power_LSTM_Simulated_Data_Grün_Gressl_Rinnhofer.pdf)** - Comprehensive documentation of our forecasting methodology and results
+📚 **[Read our Project Paper](Forecasting_PV_Power_LSTM_Simulated_Data_Grün_Gressl_Rinnhofer.pdf)** - Comprehensive documentation of our forecasting methodology and results
 
 ## 🏗️ Architecture
 
