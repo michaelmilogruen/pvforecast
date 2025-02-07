@@ -6,6 +6,8 @@
 
 Advanced photovoltaic power generation forecasting system utilizing deep learning and weather data integration.
 
+📚 **[Read our Project Paper](docs/paper.docx)** - Comprehensive documentation of our forecasting methodology and results
+
 ## 🏗️ Architecture
 
 ```mermaid
@@ -124,9 +126,7 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 
-
 ## 📞 Contact
 
 For questions and support, please contact:
 - 📧 Email: [michaelgruen@hotmail.com]
-
