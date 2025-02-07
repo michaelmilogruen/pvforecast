@@ -20,7 +20,7 @@ import pvlib
 from openpyxl.utils import get_column_letter
 from pvlib.location import Location
 from pvlib.pvsystem import PVSystem
-import poadata
+from src import poadata
 from datetime import datetime, timedelta
 import sys
 from openpyxl import load_workbook

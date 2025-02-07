@@ -15,7 +15,7 @@ import requests
 import json
 from datetime import datetime
 import csv
-from lstma import predict_power
+from src.lstma import predict_power
 
 # Load the saved model and scalers
 model = load_model('final_model.h5', compile=False)

@@ -35,13 +35,14 @@ def split_sequences(X, y, n_steps):
 def build_lstm_model(n_steps, n_features):
     model = Sequential([
         Input(shape=(n_steps, n_features)),
-        Bidirectional(LSTM(120, activation='relu', return_sequences=True)),
-        LSTM(120, activation='relu', dropout=0.3, return_sequences=True),
-        LSTM(120, activation='relu'),
+        LSTM(64, activation='relu', return_sequences=True, dropout=0.4),
+        LSTM(64, activation='relu', return_sequences=False, dropout=0.4),
+        Dense(32, activation='relu'),
         Dense(1)
     ])
     model.compile(loss='mse', optimizer=Adam(learning_rate=0.0005), metrics=['mse', 'mae'])
     return model
+
 
 
 def plot_predictions(data, test_indices, predictions, y_test_unsc):
@@ -86,29 +87,72 @@ def plot_roc_curve(y_test_unsc, predictions):
 
 
 def main():
-    data = pd.read_excel("results.xlsx", sheet_name='Model Chain Results', usecols='A,B,L,M,P')
-    data.columns = ['timestamp', 'AC_Power', 'temp_air', 'wind_speed', 'global_irradiation']
-    data['timestamp'] = pd.to_datetime(data['timestamp'])
-    data['hour'] = data['timestamp'].dt.hour
-    data['sin_hour'] = np.sin(2 * np.pi * data['hour'] / 24.0)
-    data['cos_hour'] = np.cos(2 * np.pi * data['hour'] / 24.0)
-    data['month'] = data['timestamp'].dt.month
-    data['sin_month'] = np.sin(2 * np.pi * data['month'] / 12.0)
-    data['cos_month'] = np.cos(2 * np.pi * data['month'] / 12.0)
+    # Modified data loading
+    data = pd.read_csv("merged_results.csv")
+    
+    # Define features and target
+    features = [
+        'global_irradiation',
+        'temperature',
+        'wind_speed'
+    ]
+    target = 'ac_power'
 
-    features = ['sin_hour', 'cos_hour', 'sin_month', 'cos_month', 'temp_air', 'wind_speed', 'global_irradiation']
-    target = 'AC_Power'
+    # Add day/night indicator
+    data['is_day'] = (data['global_irradiation'] > 0).astype(int)
+    features.append('is_day')
+
+    # Outcommented time-related features (optional, for debugging or reference)
+    # data['sin_hour'] = np.sin(2 * np.pi * data['hour'] / 24.0)
+    # data['cos_hour'] = np.cos(2 * np.pi * data['hour'] / 24.0)
+    # data['sin_month'] = np.sin(2 * np.pi * data['month'] / 12.0)
+    # data['cos_month'] = np.cos(2 * np.pi * data['month'] / 12.0)
+
+
 
     train_size = int(len(data) * 0.8)
     train_df = data.iloc[:train_size].copy()
     test_df = data.iloc[train_size:].copy()
 
+    # Correct scaling approach
     sc_x = MinMaxScaler().fit(train_df[features])
     sc_y = MinMaxScaler().fit(train_df[target].values.reshape(-1, 1))
+    
+    # Transform training data
     train_df[features] = sc_x.transform(train_df[features])
     train_df[target] = sc_y.transform(train_df[target].values.reshape(-1, 1))
+    
+    # Transform test data
     test_df[features] = sc_x.transform(test_df[features])
     test_df[target] = sc_y.transform(test_df[target].values.reshape(-1, 1))
+
+    # Print debugging information
+    print("\nScaling Information:")
+    print(f"Feature names: {features}")
+    
+    print("\nScaled Training Data Sample:")
+    print("Features (first 5 rows):")
+    print(train_df[features].head())
+    print("\nTarget (first 5 rows):")
+    print(train_df[target].head())
+    
+    print("\nOriginal vs Scaled Values (first 5 rows):")
+    comparison_df = pd.DataFrame({
+        'Original_Target': data.iloc[:5][target],
+        'Scaled_Target': train_df[target].iloc[:5],
+    })
+    print(comparison_df)
+
+    # Feature ranges
+    print("\nFeature value ranges after scaling:")
+    for feature in features:
+        print(f"{feature}:")
+        print(f"  Train min: {train_df[feature].min():.3f}, max: {train_df[feature].max():.3f}")
+        print(f"  Test  min: {test_df[feature].min():.3f}, max: {test_df[feature].max():.3f}")
+    
+    print("\nTarget value ranges after scaling:")
+    print(f"Train min: {train_df[target].min():.3f}, max: {train_df[target].max():.3f}")
+    print(f"Test  min: {test_df[target].min():.3f}, max: {test_df[target].max():.3f}")
 
     X = train_df[features].values
     y = train_df[target].values
@@ -121,14 +165,25 @@ def main():
     X_test, y_test = split_sequences(X_test, y_test, n_steps)
     x_test, y_test = X_test, y_test
 
+    # Print sequence shapes
+    print("\nSequence shapes:")
+    print(f"x_train shape: {x_train.shape}")
+    print(f"y_train shape: {y_train.shape}")
+    print(f"x_test shape: {x_test.shape}")
+    print(f"y_test shape: {y_test.shape}")
+
+    # Continue with model training...
     model = build_lstm_model(x_train.shape[1], x_train.shape[2])
     checkpoint = ModelCheckpoint('best_model.keras', monitor='val_loss', save_best_only=True, mode='min')
-    history = model.fit(x_train, y_train, validation_data=(x_test, y_test), epochs=10, callbacks=[checkpoint, EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)], verbose=1)
+    early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+    history = model.fit(x_train, y_train, validation_data=(x_test, y_test), epochs=50, batch_size=32, callbacks=[checkpoint, early_stopping], verbose=1)
 
     model.load_weights('best_model.keras')
 
+    # Make predictions and inverse transform using the correct scaler
     predictions = sc_y.inverse_transform(model.predict(x_test).reshape(-1, 1))
     y_test_unsc = sc_y.inverse_transform(y_test.reshape(-1, 1))
+
     print(f"MSE: {mean_squared_error(y_test_unsc, predictions):.4f}")
     print(f"MAE: {mean_absolute_error(y_test_unsc, predictions):.4f}")
     mape = np.mean(np.abs((y_test_unsc - predictions) / y_test_unsc)) * 100
@@ -138,6 +193,15 @@ def main():
 
     plot_predictions(data, test_df.index, predictions, y_test_unsc)
     plot_roc_curve(y_test_unsc, predictions)
+
+    predictions_df = pd.DataFrame({
+        "Actual (Unscaled)": y_test_unsc.flatten(),
+        "Predicted (Unscaled)": predictions.flatten()
+    })
+
+    # Save to a CSV or display
+    predictions_df.to_csv("predictions_vs_actual.csv", index=False)
+    print(predictions_df)
 
 
 if __name__ == "__main__":

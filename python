@@ -1,0 +1,10 @@
+pandas>=1.3.0
+numpy>=1.19.0
+tensorflow>=2.7.0
+scikit-learn>=0.24.0
+matplotlib>=3.4.0
+pvlib>=0.9.0
+requests>=2.26.0
+ttkbootstrap>=1.0.0
+tkintermapview>=1.13
+openpyxl>=3.0.0

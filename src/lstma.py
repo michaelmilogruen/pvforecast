@@ -9,6 +9,7 @@ from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 import matplotlib.pyplot as plt
+import joblib
 
 # 1. Load and prepare the training data
 def load_training_data(file_path):
@@ -158,6 +159,10 @@ def main():
     # Save the model and scalers
     model.save('power_forecast_model.keras')
     
+    # Save the scalers
+    joblib.dump(feature_scaler, 'feature_scaler.save')
+    joblib.dump(target_scaler, 'target_scaler.save')
+    
     return model, feature_scaler, target_scaler
 
 # Function to make predictions with new data
@@ -167,7 +172,7 @@ def predict_power(model, feature_scaler, target_scaler, new_data, seq_length=24)
     """
     scaled_features = feature_scaler.transform(new_data)
     sequences = []
-    for i in range(len(scaled_features) - seq_length):
+    for i in range(len(scaled_features) - seq_length + 1):
         sequences.append(scaled_features[i:(i + seq_length)])
     
     predictions = model.predict(np.array(sequences))
