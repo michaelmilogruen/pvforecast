@@ -15,12 +15,12 @@ import requests
 import json
 from datetime import datetime
 import csv
-from src.lstma import predict_power
+from lstma import predict_power
 
 # Load the saved model and scalers
-model = load_model('final_model.h5', compile=False)
-sc_x = joblib.load('scaler_x.pkl')
-sc_y = joblib.load('scaler_y.pkl')
+model = load_model('models/final_model.h5', compile=False)
+sc_x = joblib.load('models/scaler_x.pkl')
+sc_y = joblib.load('models/scaler_y.pkl')
 
 def fetch_weather_data():
     """
@@ -80,7 +80,7 @@ def process_weather_data(data):
 
     return new_data
 
-def export_to_csv(data, filename='forecast_data.csv'):
+def export_to_csv(data, filename='data/forecast_data.csv'):
     # Assuming 'data' is a list of dictionaries
     if not data:
         print("No data to export.")
@@ -102,9 +102,9 @@ def main():
     Main function to fetch weather data, process it, and predict power output for the next day.
     """
     # Load model and scalers
-    model = load_model('best_model.keras')
-    feature_scaler = joblib.load('feature_scaler.save')
-    target_scaler = joblib.load('target_scaler.save')
+    model = load_model('models/best_model.keras')
+    feature_scaler = joblib.load('models/feature_scaler.save')
+    target_scaler = joblib.load('models/target_scaler.save')
 
     weather_data = fetch_weather_data()
     if weather_data is not None:
@@ -142,7 +142,7 @@ def main():
                 'timestamp': future_time,
                 'power_w': power[0] if new_data['poa_global'].iloc[i] != 0 else 0,  # Set to zero if irradiation is zero
                 'temperature_c': new_data['temp_air'].iloc[i],
-                'wind_speed_ms': new_data['wind_speed'].iloc[i],
+                'wind_speed_ms': new_data['wind_speed'].iloc[i] * 3.6,  # Convert m/s to km/h
                 'global_irradiation': new_data['poa_global'].iloc[i]
             })
 

@@ -60,42 +60,39 @@ class SunAnimation(tk.Canvas):
         self.create_arc(arc_bbox, start=0, extent=180, 
                        style='arc', outline='#4B6075', width=2)
         
-        # Draw symbolic building (simplified)
-        building_x = self.center_x - self.building_width // 2
-        building_y = self.center_y - 5  # Slight offset from bottom
+        # Draw modern minimalistic house
+        house_width = 40
+        house_height = 35
+        house_x = self.center_x - house_width // 2
+        house_y = self.center_y - 5  # Slight offset from bottom
         
-        # Building base
+        # House base (simple rectangle)
         self.create_rectangle(
-            building_x,
-            building_y - self.building_height,
-            building_x + self.building_width,
-            building_y,
-            fill='#2B4055',
-            outline='#3B5065',
-            width=2
+            house_x,
+            house_y - house_height,
+            house_x + house_width,
+            house_y,
+            fill='#2A2A2A',
+            outline='#45B7D1',
+            width=1
         )
         
-        # Roof (triangle)
-        roof_points = [
-            building_x,
-            building_y - self.building_height,
-            building_x + self.building_width // 2,
-            building_y - self.building_height - 20,
-            building_x + self.building_width,
-            building_y - self.building_height
-        ]
-        self.create_polygon(roof_points, fill='#3B5065', outline='#4B6075', width=2)
+        # Flat roof with solar panels
+        panel_margin = 2
+        panel_height = 8
+        panel_segments = 3
+        panel_width = (house_width - (panel_segments + 1) * panel_margin) / panel_segments
         
-        # Add PV panel on roof (symbolic)
-        panel_width = self.building_width * 0.7
-        panel_height = 10
-        panel_x = self.center_x - panel_width // 2
-        panel_y = building_y - self.building_height - 15
-        self.create_rectangle(
-            panel_x, panel_y,
-            panel_x + panel_width, panel_y + panel_height,
-            fill='#1E90FF', outline='#4B6075', width=2
-        )
+        for i in range(panel_segments):
+            x = house_x + panel_margin + i * (panel_width + panel_margin)
+            y = house_y - house_height - panel_height
+            self.create_rectangle(
+                x, y,
+                x + panel_width, y + panel_height,
+                fill='#45B7D1',
+                outline='#45B7D1',
+                width=1
+            )
         
     def update_sun_position(self, timestamp, irradiation):
         if self.sun:
@@ -145,7 +142,24 @@ class ForecastUI:
         self.root.title("PV Power Forecast")
         
         # Store the style object as instance variable
-        self.style = tb.Style(theme='superhero')
+        # Configure custom style
+        self.style = tb.Style(theme='darkly')
+        
+        # Configure custom colors and styles
+        self.style.configure('Custom.TFrame', background='#1A1A1A')
+        self.style.configure('Card.TFrame',
+                            background='#2A2A2A',
+                            borderwidth=1,
+                            relief='solid',
+                            padding=15)
+        self.style.configure('Stats.TLabel',
+                            font=('Segoe UI', 10),
+                            foreground='#888888',
+                            background='#2A2A2A')
+        self.style.configure('Value.TLabel',
+                            font=('Segoe UI', 32, 'bold'),
+                            foreground='#45B7D1',
+                            background='#2A2A2A')
         
         # Initialize status bar
         self.status_var = tk.StringVar()
@@ -158,9 +172,22 @@ class ForecastUI:
         )
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         
+        # Configure notebook style
+        self.style.configure('TNotebook',
+                           background='#1A1A1A',
+                           borderwidth=0)
+        self.style.configure('TNotebook.Tab',
+                           background='#2A2A2A',
+                           foreground='#888888',
+                           padding=[20, 5],
+                           font=('Segoe UI', 9))
+        self.style.map('TNotebook.Tab',
+                      background=[('selected', '#1A1A1A')],
+                      foreground=[('selected', '#FFFFFF')])
+        
         # Create notebook for tabs
         self.notebook = ttk.Notebook(root)
-        self.notebook.pack(fill='both', expand=True, padx=10, pady=5)
+        self.notebook.pack(fill='both', expand=True, padx=20, pady=10)
         
         # Create tabs
         self.forecast_tab = ttk.Frame(self.notebook)
@@ -174,21 +201,78 @@ class ForecastUI:
         # Initialize the map in stats tab
         self.create_map_view()
         
-        # Create main frame in forecast tab
-        self.main_frame = ttk.Frame(self.forecast_tab, padding="10")
+        # Create main frame in forecast tab with dark background
+        self.main_frame = ttk.Frame(self.forecast_tab, style='Custom.TFrame', padding="20")
         self.main_frame.pack(fill='both', expand=True)
         
-        # Create Treeview first
+        # Create stats cards frame
+        self.stats_frame = ttk.Frame(self.main_frame, style='Custom.TFrame')
+        self.stats_frame.pack(fill='x', pady=(0, 20))
+        
+        # Create three card frames for key stats
+        for i, (title, value, unit) in enumerate([
+            ("Peak Power Today", "2563", "W"),
+            ("Current Temperature", "-0.1", "°C"),
+            ("Solar Irradiance", "118.7", "W/m²")
+        ]):
+            # Create card with fixed minimum width
+            card = ttk.Frame(self.stats_frame, style='Card.TFrame', width=300)
+            card.grid(row=0, column=i, padx=10, sticky='ew')
+            card.grid_propagate(False)  # Maintain fixed size
+            self.stats_frame.columnconfigure(i, weight=1)
+            
+            # Title at top
+            title_label = ttk.Label(card, text=title, style='Stats.TLabel')
+            title_label.pack(anchor='w', pady=(0,5))
+            
+            # Center frame for value and unit
+            center_frame = ttk.Frame(card, style='Card.TFrame')
+            center_frame.pack(expand=True, fill='both')
+            
+            # Value and unit container
+            value_container = ttk.Frame(center_frame, style='Card.TFrame')
+            value_container.pack(expand=True, anchor='center')
+            
+            # Value and unit on same line
+            ttk.Label(value_container, text=value,
+                     style='Value.TLabel',
+                     font=('Segoe UI', 28, 'bold')).pack(side='left')
+            ttk.Label(value_container,
+                     text=f" {unit}",
+                     style='Value.TLabel',
+                     font=('Segoe UI', 14, 'bold'),
+                     foreground='#888888').pack(side='left', padx=(2,0))
+        
+        # Create Treeview in a card frame
+        self.data_card = ttk.Frame(self.main_frame, style='Card.TFrame')
+        self.data_card.pack(fill='both', expand=True)
+        
+        # Add title for the data section
+        ttk.Label(self.data_card,
+                 text="Forecast Data",
+                 style='Stats.TLabel').pack(anchor='w', pady=(0, 10))
+        
         self.create_treeview()
         
-        # Create and style the refresh button after treeview
+        # Configure refresh button style
+        self.style.configure('Refresh.TButton',
+                           background='#45B7D1',
+                           foreground='white',
+                           padding=[15, 8],
+                           font=('Segoe UI', 9))
+        
+        # Create button container for centering
+        button_container = ttk.Frame(self.data_card, style='Card.TFrame')
+        button_container.pack(fill='x', pady=(10, 0))
+        
+        # Create and style the refresh button
         self.forecast_button = ttk.Button(
-            self.main_frame,
+            button_container,
             text="↻ Refresh Forecast",
             command=self.show_forecast,
-            style='Accent.TButton'
+            style='Refresh.TButton'
         )
-        self.forecast_button.pack(pady=10)
+        self.forecast_button.pack(anchor='center', pady=10)
 
     def show_forecast(self):
         self.status_var.set("Loading forecast data...")
@@ -198,7 +282,7 @@ class ForecastUI:
             self.tree.delete(item)
             
         try:
-            df = pd.read_csv('forecast_data.csv')
+            df = pd.read_csv('data/forecast_data.csv')
             df['timestamp'] = pd.to_datetime(df['timestamp'])
             
             current_time = datetime.now()
@@ -206,7 +290,7 @@ class ForecastUI:
             
             for _, row in forecast_data.iterrows():
                 values = (
-                    row['timestamp'].strftime('%Y-%m-%d %H:%M'),
+                    row['timestamp'].strftime('%d.%m.%Y %H:%M'),
                     f"{row['power_w']:.1f}",
                     f"{row['temperature_c']:.1f}",
                     f"{row['wind_speed_ms']:.1f}",
@@ -223,8 +307,27 @@ class ForecastUI:
 
     def create_treeview(self):
         """Create and configure the Treeview widget"""
-        self.forecast_frame = ttk.Frame(self.main_frame)
+        self.forecast_frame = ttk.Frame(self.data_card)
         self.forecast_frame.pack(fill='both', expand=True)
+        
+        # Configure Treeview style
+        style = ttk.Style()
+        style.configure("Treeview",
+                       background="#2A2A2A",
+                       foreground="#CCCCCC",
+                       fieldbackground="#2A2A2A",
+                       rowheight=35,
+                       font=('Segoe UI', 9))
+        
+        style.configure("Treeview.Heading",
+                       background="#1A1A1A",
+                       foreground="#888888",
+                       relief="flat",
+                       font=('Segoe UI', 9))
+        
+        style.map("Treeview",
+                 background=[('selected', '#333333')],
+                 foreground=[('selected', '#45B7D1')])
         
         self.tree = ttk.Treeview(
             self.forecast_frame,
@@ -237,7 +340,7 @@ class ForecastUI:
             "Time": ("Time", 150),
             "Power": ("AC Power (W)", 120),
             "Temperature": ("Temperature (°C)", 120),
-            "Wind": ("Wind Speed (m/s)", 120),
+            "Wind": ("Wind Speed (km/h)", 120),
             "Irradiation": ("Irradiation (W/m²)", 120)
         }
         
@@ -280,11 +383,11 @@ class ForecastUI:
         # Create figure with subplots and dark background
         plt.style.use('default')
         fig = plt.figure(figsize=(12, 8))
-        fig.patch.set_facecolor('#2B3E50')  # Dark blue background
+        fig.patch.set_facecolor('#1A1A1A')  # Match UI background
         
         # Power plot
         ax1 = plt.subplot(2, 1, 1)
-        ax1.set_facecolor('#2B3E50')  # Dark blue background
+        ax1.set_facecolor('#2A2A2A')  # Match card background
         ax1.plot(forecast_data['timestamp'], 
                 forecast_data['power_w'], 
                 color='#45B7D1',  # Bright blue
@@ -307,7 +410,7 @@ class ForecastUI:
 
         # Temperature and Wind Speed plot
         ax2 = plt.subplot(2, 1, 2)
-        ax2.set_facecolor('#2B3E50')
+        ax2.set_facecolor('#2A2A2A')  # Match card background
         
         # Plot temperature
         line1 = ax2.plot(forecast_data['timestamp'], 
@@ -334,7 +437,7 @@ class ForecastUI:
                              markersize=8,
                              markerfacecolor='white')
         
-        ax2_twin.set_ylabel('Wind Speed (m/s)', fontsize=12, fontweight='bold', color='white')
+        ax2_twin.set_ylabel('Wind Speed (km/h)', fontsize=12, fontweight='bold', color='white')
         ax2_twin.tick_params(colors='white')
 
         # Customize spines for both axes
@@ -399,16 +502,28 @@ class ForecastUI:
         )
 
 def main():
-    root = tb.Window(themename="superhero")
+    root = tb.Window(themename="darkly")
     
     try:
         # Load the pv.ico file
         root.iconbitmap('pv.ico')
         
-        # Configure title bar color (darker blue)
-        root.configure(background='#1B2838')  # Dark blue color
+        # Configure window appearance
+        root.configure(background='#1A1A1A')
+        root.title("⚡ PV Power Forecast")
+        
+        # Set window size and position
+        window_width = 1000
+        window_height = 800
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+        center_x = int(screen_width/2 - window_width/2)
+        center_y = int(screen_height/2 - window_height/2)
+        root.geometry(f'{window_width}x{window_height}+{center_x}+{center_y}')
+        
+        # Configure title bar and theme
         style = ttk.Style()
-        style.configure('TitleBar.TFrame', background='#1B2838')  # Same dark blue for title bar
+        style.configure('TitleBar.TFrame', background='#1A1A1A')
         
     except Exception as e:
         print(f"Could not load icon: {e}")
