@@ -1,4 +1,4 @@
-# ğŸŒ PV Forecast
+# í¼ PV Forecast
 
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![TensorFlow](https://img.shields.io/badge/TensorFlow-2.0%2B-orange.svg)](https://tensorflow.org/)
@@ -6,9 +6,9 @@
 
 Advanced photovoltaic power generation forecasting system utilizing deep learning and weather data integration.
 
-ğŸ“š **[Read our Project Paper](Forecasting_PV_Power_LSTM_Simulated_Data_GrÃ¼n_Gressl_Rinnhofer.pdf)** - Comprehensive documentation of our forecasting methodology and results
+í³š **[Read our Project Paper](Forecasting_PV_Power_LSTM_Simulated_Data_GrÃ¼n_Gressl_Rinnhofer.pdf)** - Comprehensive documentation of our forecasting methodology and results
 
-## ğŸ—ï¸ Architecture
+## í¿—ï¸ Architecture
 
 ```mermaid
 graph TD
@@ -19,26 +19,26 @@ graph TD
     E --> F[Visualization]
 ```
 
-## ğŸ“ Project Structure
+## í³ Project Structure
 
 ```
 pvforecast/
-â”œâ”€â”€ ğŸ“‚ src/                  # Source code
-â”‚   â”œâ”€â”€ ğŸ”® forecast.py       # Main forecasting logic
-â”‚   â”œâ”€â”€ ğŸ§  lstm.py          # LSTM model implementations
-â”‚   â””â”€â”€ ğŸ¨ ui.py            # Web interface
-â”œâ”€â”€ ğŸ“Š data/                 # Data files
+â”œâ”€â”€ í³‚ src/                  # Source code
+â”‚   â”œâ”€â”€ í´® forecast.py       # Main forecasting logic
+â”‚   â”œâ”€â”€ í·  lstm.py          # LSTM model implementations
+â”‚   â””â”€â”€ í¾¨ ui.py            # Web interface
+â”œâ”€â”€ í³Š data/                 # Data files
 â”‚   â”œâ”€â”€ measurements/        # PV measurements
 â”‚   â””â”€â”€ weather/            # Weather data
-â”œâ”€â”€ ğŸ¤– models/               # Trained ML models
-â”œâ”€â”€ ğŸ“š docs/                 # Documentation
+â”œâ”€â”€ í´– models/               # Trained ML models
+â”œâ”€â”€ í³š docs/                 # Documentation
 â”œâ”€â”€ âš™ï¸ config/               # Configuration
-â”œâ”€â”€ ğŸ“ˆ visualizations/       # Output plots
-â”œâ”€â”€ ğŸ““ notebooks/           # Jupyter notebooks
-â””â”€â”€ ğŸ§ª tests/               # Test suite
+â”œâ”€â”€ í³ˆ visualizations/       # Output plots
+â”œâ”€â”€ í³“ notebooks/           # Jupyter notebooks
+â””â”€â”€ í·ª tests/               # Test suite
 ```
 
-## ğŸš€ Key Features
+## íº€ Key Features
 
 - **Advanced ML Models**: LSTM-based architecture for time series forecasting
 - **Multi-Source Data Integration**: Combines weather forecasts with historical PV data
@@ -46,18 +46,18 @@ pvforecast/
 - **Interactive Visualization**: Web-based dashboard for forecast monitoring
 - **Scalable Architecture**: Modular design for easy extension
 
-## ğŸ’» Technical Stack
+## í²» Technical Stack
 
 - **Backend**
-  - ğŸ Python 3.8+
-  - ğŸ§  TensorFlow/Keras
-  - ğŸ”¢ NumPy/Pandas
-  - ğŸŒ FastAPI
+  - í° Python 3.8+
+  - í·  TensorFlow/Keras
+  - í´¢ NumPy/Pandas
+  - í¼ FastAPI
 
 - **Frontend**
-  - ğŸ“Š D3.js
-  - ğŸ¨ React
-  - ğŸ“± Responsive Design
+  - í³Š D3.js
+  - í¾¨ React
+  - í³± Responsive Design
 
 ## âš¡ Quick Start
 
@@ -91,7 +91,7 @@ pvforecast/
    python src/ui.py
    ```
 
-## ğŸ“Š Performance Metrics
+## í³Š Performance Metrics
 
 | Model | MAE (kW) | RMSE (kW) | Forecast Horizon |
 |-------|----------|-----------|-----------------|
@@ -99,34 +99,49 @@ pvforecast/
 | LSTM+ | 0.38     | 0.59      | 24h            |
 | Ensemble| 0.35    | 0.54      | 24h            |
 
-## ğŸ” API Documentation
+## í´ API Documentation
 
 Detailed API documentation is available in [`docs/pvforecast_api_doc.pdf`](docs/pvforecast_api_doc.pdf)
 
-## ğŸ¤ Contributing
+## í´ Contributing
 
 We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
 
-1. ğŸ´ Fork the repository
-2. ğŸŒ¿ Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. ğŸ’¾ Commit your changes (`git commit -m 'Add amazing feature'`)
-4. ğŸ“¤ Push to the branch (`git push origin feature/amazing-feature`)
-5. ğŸ”„ Open a Merge Request
+1. í½´ Fork the repository
+2. í¼¿ Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. ï¿½ï¿½ Commit your changes (`git commit -m 'Add amazing feature'`)
+4. í³¤ Push to the branch (`git push origin feature/amazing-feature`)
+5. í´„ Open a Merge Request
 
-## ğŸ“ˆ Project Status
+## í³ˆ Project Status
 
 - âœ… Core ML models implemented
 - âœ… Data pipeline operational
-- ğŸš§ Web interface under development
-- ğŸ“‹ API documentation in progress
-- ğŸ¯ Model optimization ongoing
+- íº§ Web interface under development
+- í³‹ API documentation in progress
+- í¾¯ Model optimization ongoing
 
-## ğŸ“œ License
+## í³œ License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## í¼¦ï¸ Weather Data Source
 
-## ğŸ“ Contact
+The weather forecast data is provided by GeoSphere Austria's AROME (Application of Research to Operations at MEsoscale) model with the following specifications:
+
+- **Spatial Resolution**: 2.5 km grid
+- **Temporal Resolution**: Hourly data
+- **Update Frequency**: Recalculated every 3 hours
+- **Forecast Horizon**: 60 hours
+- **Geographic Coverage**: 42.98Â° - 51.82Â° N, 5.49Â° - 22.1Â° E (extended Alpine region)
+- **Projection**: WGS84 - World Geodetic System 1984 (EPSG: 4326)
+- **Parameters**: Temperature, precipitation, wind, global radiation, relative humidity, thunderstorm indices, cloud cover, pressure
+- **License**: Creative Commons Attribution 4.0
+- **DOI**: https://doi.org/10.60669/9zm8-s664
+- **Model Development**: The AROME model code is developed in collaboration with partner weather services of the ACCORD consortium
+
+## í³ Contact
 
 For questions and support, please contact:
-- ğŸ“§ Email: [michaelgruen@hotmail.com]
+- í³§ Email: [michaelgruen@hotmail.com]
+
