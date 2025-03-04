@@ -99,7 +99,7 @@ class SunAnimation(tk.Canvas):
             self.delete(self.sun)
             
         # Parse hour and minute from timestamp
-        dt = datetime.strptime(timestamp, '%Y-%m-%d %H:%M')
+        dt = datetime.strptime(timestamp, '%d.%m.%Y %H:%M')
         hour = dt.hour + dt.minute / 60
         
         # Calculate sun position (only show sun between 6:00 and 18:00)
@@ -144,6 +144,9 @@ class ForecastUI:
         # Store the style object as instance variable
         # Configure custom style
         self.style = tb.Style(theme='darkly')
+        
+        # Initialize data loading
+        self.root.after(100, self.show_forecast)  # Load data after UI is initialized
         
         # Configure custom colors and styles
         self.style.configure('Custom.TFrame', background='#1A1A1A')
@@ -211,9 +214,9 @@ class ForecastUI:
         
         # Create three card frames for key stats
         for i, (title, value, unit) in enumerate([
-            ("Peak Power Today", "2563", "W"),
-            ("Current Temperature", "-0.1", "°C"),
-            ("Solar Irradiance", "118.7", "W/m²")
+            ("Current Power", "0", "W"),
+            ("Current Temperature", "0", "°C"),
+            ("Solar Irradiance", "0", "W/m²")
         ]):
             # Create card with fixed minimum width
             card = ttk.Frame(self.stats_frame, style='Card.TFrame', width=300)
@@ -254,6 +257,21 @@ class ForecastUI:
         
         self.create_treeview()
         
+    def update_stats_cards(self, power, temperature, irradiance):
+        """Update the stats cards with current values"""
+        # Find all Value.TLabel widgets in the stats frame
+        for card in self.stats_frame.winfo_children():
+            value_container = card.winfo_children()[1].winfo_children()[0]
+            value_label = value_container.winfo_children()[0]
+            
+            # Update value based on the card's position
+            if "Current Power" in card.winfo_children()[0].cget("text"):
+                value_label.configure(text=f"{power:.1f}")
+            elif "Current Temperature" in card.winfo_children()[0].cget("text"):
+                value_label.configure(text=f"{temperature:.1f}")
+            elif "Solar Irradiance" in card.winfo_children()[0].cget("text"):
+                value_label.configure(text=f"{irradiance:.1f}")
+        
         # Configure refresh button style
         self.style.configure('Refresh.TButton',
                            background='#45B7D1',
@@ -285,9 +303,21 @@ class ForecastUI:
             df = pd.read_csv('data/forecast_data.csv')
             df['timestamp'] = pd.to_datetime(df['timestamp'])
             
+            # Get current values for stats cards
             current_time = datetime.now()
-            forecast_data = df[df['timestamp'] > current_time].head(12)
+            current_data = df.iloc[0]  # Get first row for current values
             
+            # Update stats cards with current values
+            self.update_stats_cards(
+                power=current_data['power_w'],
+                temperature=current_data['temperature_c'],
+                irradiance=current_data['global_irradiation']
+            )
+            
+            # Get forecast data (show all available data)
+            forecast_data = df[df['timestamp'] > current_time]
+            
+            # Update treeview with forecast data
             for _, row in forecast_data.iterrows():
                 values = (
                     row['timestamp'].strftime('%d.%m.%Y %H:%M'),
@@ -340,7 +370,7 @@ class ForecastUI:
             "Time": ("Time", 150),
             "Power": ("AC Power (W)", 120),
             "Temperature": ("Temperature (°C)", 120),
-            "Wind": ("Wind Speed (km/h)", 120),
+            "Wind": ("Wind Speed (m/s)", 120),
             "Irradiation": ("Irradiation (W/m²)", 120)
         }
         
@@ -437,7 +467,7 @@ class ForecastUI:
                              markersize=8,
                              markerfacecolor='white')
         
-        ax2_twin.set_ylabel('Wind Speed (km/h)', fontsize=12, fontweight='bold', color='white')
+        ax2_twin.set_ylabel('Wind Speed (m/s)', fontsize=12, fontweight='bold', color='white')
         ax2_twin.tick_params(colors='white')
 
         # Customize spines for both axes
