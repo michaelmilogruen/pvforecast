@@ -5,6 +5,9 @@ import os
 from typing import Dict, List, Optional
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pvlib
+from pvlib.location import Location
+from pvlib.clearsky import simplified_solis 
 
 class DataProcessor:
     def __init__(self, chunk_size: int = 100000):
@@ -54,6 +57,9 @@ class DataProcessor:
         
         # Resample to target frequency using appropriate methods
         resampled = df.resample(self.target_frequency).interpolate(method='linear')
+        
+        # Calculate clear sky values
+        resampled = self.calculate_clear_sky(resampled)
         
         return resampled
 
@@ -190,7 +196,66 @@ class DataProcessor:
         table = pa.Table.from_pandas(df)
         pq.write_table(table, output_path, compression='snappy')
 
-    def process_all(self, inca_path: str, station_path: str, pv_path: str, 
+    def calculate_clear_sky(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculate clear sky irradiance values using pvlib."""
+        # Define location parameters
+        latitude = 47.38770748541585
+        longitude = 15.094127778561258
+        altitude = 541  # approximate altitude for Leoben
+        tz = 'Etc/GMT+1'
+        location = Location(latitude, longitude, tz, altitude)
+
+        # Get solar position
+        solar_position = location.get_solarposition(df.index)
+        
+        # Calculate pressure based on altitude (approximately)
+        pressure = pvlib.atmosphere.alt2pres(altitude)
+        
+        # Get precipitable water from relative humidity and temperature
+        # Using a simple approximation based on temperature and RH
+        temp_air = df['T2M [degree_Celsius]'].values
+        relative_humidity = df['RH2M [percent]'].values
+        # Approximate precipitable water (in cm) using a simple model
+        # This is a rough approximation - could be improved with more sophisticated models
+        precipitable_water = 1.0  # Default value as a simple approximation
+
+        # Calculate apparent elevation and ensure it's not negative
+        apparent_elevation = 90 - solar_position['apparent_zenith']
+        apparent_elevation = apparent_elevation.clip(lower=0)  # Set negative elevations to 0
+
+        # Calculate clear sky irradiance using simplified Solis model
+        clear_sky = simplified_solis(
+            apparent_elevation=apparent_elevation,
+            aod700=0.1,  # Default value for aerosol optical depth
+            precipitable_water=precipitable_water,
+            pressure=pressure
+        )
+
+        # Set irradiance components to 0 for nighttime (elevation <= 0)
+        night_mask = (apparent_elevation <= 0)
+        clear_sky['ghi'][night_mask] = 0
+        clear_sky['dni'][night_mask] = 0
+        clear_sky['dhi'][night_mask] = 0
+
+        # Add clear sky values to dataframe
+        df['ClearSkyGHI'] = clear_sky['ghi']
+        df['ClearSkyDNI'] = clear_sky['dni']
+        df['ClearSkyDHI'] = clear_sky['dhi']
+
+        # Calculate clear sky index (ratio of measured to clear sky GHI)
+        # Handle division by zero and very small values
+        df['ClearSkyIndex'] = np.where(
+            df['ClearSkyGHI'] > 10,  # Only calculate for significant irradiance
+            df['GL [W m-2]'] / df['ClearSkyGHI'],
+            0  # Set to 0 for nighttime or very low irradiance
+        )
+
+        # Clip unrealistic clear sky index values
+        df['ClearSkyIndex'] = df['ClearSkyIndex'].clip(0, 1.5)  # Typical range is 0-1.2
+
+        return df
+
+    def process_all(self, inca_path: str, station_path: str, pv_path: str,
                    output_path: str):
         """Process all datasets and save the result."""
         print("Processing INCA data...")
