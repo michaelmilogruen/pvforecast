@@ -51,9 +51,12 @@ class DataProcessor:
         )
         
         # Select relevant columns
-        columns = ['GL [W m-2]', 'T2M [degree_Celsius]', 'RH2M [percent]', 
+        columns = ['GL [W m-2]', 'T2M [degree_Celsius]', 'RH2M [percent]',
                   'UU [m s-1]', 'VV [m s-1]']
         df = df[columns]
+        
+        # Calculate total wind speed from east and north components
+        df['WindSpeed [m s-1]'] = np.sqrt(df['UU [m s-1]']**2 + df['VV [m s-1]']**2)
         
         # Resample to target frequency using appropriate methods
         resampled = df.resample(self.target_frequency).interpolate(method='linear')
@@ -208,8 +211,8 @@ class DataProcessor:
         # Get solar position
         solar_position = location.get_solarposition(df.index)
         
-        # Calculate pressure based on altitude (approximately)
-        pressure = pvlib.atmosphere.alt2pres(altitude)
+        # Calculate pressure based on altitude (approximately) and convert from hPa to Pa
+        pressure = pvlib.atmosphere.alt2pres(altitude) * 100  # Convert from hPa to Pa
         
         # Get precipitable water from relative humidity and temperature
         # Using a simple approximation based on temperature and RH
