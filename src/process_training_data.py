@@ -7,7 +7,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pvlib
 from pvlib.location import Location
-from pvlib.clearsky import simplified_solis 
+from pvlib.clearsky import simplified_solis
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+import joblib
 
 class DataProcessor:
     def __init__(self, chunk_size: int = 100000):
@@ -50,13 +52,22 @@ class DataProcessor:
             date_format='%Y-%m-%dT%H:%M+00:00'
         )
         
-        # Select relevant columns
+        # Select relevant columns and add INCA prefix
         columns = ['GL [W m-2]', 'T2M [degree_Celsius]', 'RH2M [percent]',
                   'UU [m s-1]', 'VV [m s-1]']
         df = df[columns]
         
         # Calculate total wind speed from east and north components
-        df['WindSpeed [m s-1]'] = np.sqrt(df['UU [m s-1]']**2 + df['VV [m s-1]']**2)
+        df['INCA_WindSpeed [m s-1]'] = np.sqrt(df['UU [m s-1]']**2 + df['VV [m s-1]']**2)
+        
+        # Rename columns with INCA prefix
+        df = df.rename(columns={
+            'GL [W m-2]': 'INCA_GlobalRadiation [W m-2]',
+            'T2M [degree_Celsius]': 'INCA_Temperature [degree_Celsius]',
+            'RH2M [percent]': 'INCA_RelativeHumidity [percent]',
+            'UU [m s-1]': 'INCA_WindU [m s-1]',
+            'VV [m s-1]': 'INCA_WindV [m s-1]'
+        })
         
         # Resample to target frequency using appropriate methods
         resampled = df.resample(self.target_frequency).interpolate(method='linear')
@@ -74,11 +85,11 @@ class DataProcessor:
             date_format='%Y-%m-%dT%H:%M+00:00'
         )
         
-        # Define critical measurements and their quality flags
+        # Define critical measurements and their quality flags with descriptive names
         critical_columns = {
-            'cglo': 'cglo_flag',
-            'tl': 'tl_flag',
-            'ff': 'ff_flag'
+            'cglo': 'cglo_flag',  # Global radiation
+            'tl': 'tl_flag',      # Air temperature
+            'ff': 'ff_flag'       # Wind speed
         }
         
         # Filter based on quality flags (flag value 12 seems to be good based on data inspection)
@@ -91,13 +102,26 @@ class DataProcessor:
         available_cols = [col for col in relevant_cols if col in df.columns]
         df = df[available_cols]
         
-        # Resample to target frequency
+        # Rename columns to be more descriptive with Station prefix
+        column_mapping = {
+            'cglo': 'Station_GlobalRadiation [W m-2]',  # Global radiation measurement
+            'tl': 'Station_Temperature [degree_Celsius]',  # Air temperature
+            'ff': 'Station_WindSpeed [m s-1]',  # Wind speed
+            'rr': 'Station_Precipitation [mm]',  # Rainfall/precipitation
+            'p': 'Station_Pressure [hPa]'  # Air pressure
+        }
+        df = df.rename(columns=column_mapping)
+        
+        # Update available columns with new names
+        available_cols = [column_mapping[col] for col in available_cols if col in column_mapping]
+        
+        # Resample to target frequency with renamed columns
         agg_dict = {
-            'cglo': 'mean',
-            'tl': 'mean',
-            'ff': 'mean',
-            'rr': 'sum',
-            'p': 'mean'
+            'Station_GlobalRadiation [W m-2]': 'mean',
+            'Station_Temperature [degree_Celsius]': 'mean',
+            'Station_WindSpeed [m s-1]': 'mean',
+            'Station_Precipitation [mm]': 'sum',
+            'Station_Pressure [hPa]': 'mean'
         }
         # Only include columns that are actually present
         agg_dict = {k: v for k, v in agg_dict.items() if k in available_cols}
@@ -173,8 +197,68 @@ class DataProcessor:
         
         return df
 
-    def merge_datasets(self, inca_df: pd.DataFrame, station_df: pd.DataFrame, 
-                      pv_df: pd.DataFrame) -> pd.DataFrame:
+    def normalize_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Normalize different types of features appropriately."""
+        from sklearn.preprocessing import MinMaxScaler, StandardScaler
+        import joblib
+        import os
+
+        # Create models directory if it doesn't exist
+        os.makedirs('models', exist_ok=True)
+
+        # Initialize scalers
+        minmax_scaler = MinMaxScaler()
+        standard_scaler = StandardScaler()
+
+        # Group columns by normalization type
+        minmax_columns = [
+            # INCA Radiation features
+            'INCA_GlobalRadiation [W m-2]',
+            'INCA_ClearSkyGHI',
+            'INCA_ClearSkyDNI',
+            'INCA_ClearSkyDHI',
+            # Station Radiation features
+            'Station_GlobalRadiation [W m-2]',
+            # PV output features
+            'power_w', 'energy_wh', 'energy_interval',
+            # Cyclic features already normalized
+            'hour_sin', 'hour_cos', 'day_sin', 'day_cos'
+        ]
+        
+        standard_columns = [
+            # INCA weather measurements
+            'INCA_Temperature [degree_Celsius]',
+            'INCA_RelativeHumidity [percent]',
+            'INCA_WindSpeed [m s-1]',
+            'INCA_WindU [m s-1]',
+            'INCA_WindV [m s-1]',
+            'INCA_ClearSkyIndex',
+            # Station weather measurements
+            'Station_Temperature [degree_Celsius]',
+            'Station_WindSpeed [m s-1]',
+            'Station_Precipitation [mm]',
+            'Station_Pressure [hPa]'
+        ]
+
+        # Filter columns that actually exist in the dataframe
+        minmax_columns = [col for col in minmax_columns if col in df.columns]
+        standard_columns = [col for col in standard_columns if col in df.columns]
+
+        # Apply MinMaxScaler to radiation and PV output features (0 to 1 range)
+        if minmax_columns:
+            df[minmax_columns] = minmax_scaler.fit_transform(df[minmax_columns])
+            joblib.dump(minmax_scaler, 'models/minmax_scaler.pkl')
+
+        # Apply StandardScaler to weather measurements (zero mean, unit variance)
+        if standard_columns:
+            df[standard_columns] = standard_scaler.fit_transform(df[standard_columns])
+            joblib.dump(standard_scaler, 'models/standard_scaler.pkl')
+
+        # Hour and day of year are kept as is since they're already normalized cyclically
+        return df
+
+    def merge_datasets(self, inca_df: pd.DataFrame, station_df: pd.DataFrame,
+                       pv_df: pd.DataFrame) -> pd.DataFrame:
         """Merge all datasets on timestamp index."""
         print("\nDataset shapes before merge:")
         print(f"INCA data: {inca_df.shape}")
@@ -191,6 +275,11 @@ class DataProcessor:
         
         # Add derived features
         merged = self.add_derived_features(merged)
+        
+        # Normalize the data
+        print("\nNormalizing data...")
+        merged = self.normalize_data(merged)
+        print("Data normalization complete")
         
         return merged
 
@@ -216,8 +305,8 @@ class DataProcessor:
         
         # Get precipitable water from relative humidity and temperature
         # Using a simple approximation based on temperature and RH
-        temp_air = df['T2M [degree_Celsius]'].values
-        relative_humidity = df['RH2M [percent]'].values
+        temp_air = df['INCA_Temperature [degree_Celsius]'].values
+        relative_humidity = df['INCA_RelativeHumidity [percent]'].values
         # Approximate precipitable water (in cm) using a simple model
         # This is a rough approximation - could be improved with more sophisticated models
         precipitable_water = 1.0  # Default value as a simple approximation
@@ -240,21 +329,21 @@ class DataProcessor:
         clear_sky['dni'][night_mask] = 0
         clear_sky['dhi'][night_mask] = 0
 
-        # Add clear sky values to dataframe
-        df['ClearSkyGHI'] = clear_sky['ghi']
-        df['ClearSkyDNI'] = clear_sky['dni']
-        df['ClearSkyDHI'] = clear_sky['dhi']
+        # Add clear sky values to dataframe with INCA prefix
+        df['INCA_ClearSkyGHI'] = clear_sky['ghi']
+        df['INCA_ClearSkyDNI'] = clear_sky['dni']
+        df['INCA_ClearSkyDHI'] = clear_sky['dhi']
 
         # Calculate clear sky index (ratio of measured to clear sky GHI)
         # Handle division by zero and very small values
-        df['ClearSkyIndex'] = np.where(
-            df['ClearSkyGHI'] > 10,  # Only calculate for significant irradiance
-            df['GL [W m-2]'] / df['ClearSkyGHI'],
+        df['INCA_ClearSkyIndex'] = np.where(
+            df['INCA_ClearSkyGHI'] > 10,  # Only calculate for significant irradiance
+            df['INCA_GlobalRadiation [W m-2]'] / df['INCA_ClearSkyGHI'],
             0  # Set to 0 for nighttime or very low irradiance
         )
 
         # Clip unrealistic clear sky index values
-        df['ClearSkyIndex'] = df['ClearSkyIndex'].clip(0, 1.5)  # Typical range is 0-1.2
+        df['INCA_ClearSkyIndex'] = df['INCA_ClearSkyIndex'].clip(0, 1.5)  # Typical range is 0-1.2
 
         return df
 
