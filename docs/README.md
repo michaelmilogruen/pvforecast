@@ -48,7 +48,8 @@ pvforecast/
 
 ## 🔄 Data Processing Pipeline
 
-The project implements a sophisticated data processing pipeline that combines multiple data sources:
+The project implements a sophisticated data processing pipeline that combines multiple data sources. For detailed implementation, see our [Data Processing Documentation](data_processing.md).
+
 
 ### Data Sources
 - **INCA Weather Data**: Hourly meteorological data including:
