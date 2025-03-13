@@ -219,6 +219,9 @@ class DataProcessor:
             'INCA_ClearSkyDHI',
             # Station Radiation features
             'Station_GlobalRadiation [W m-2]',
+            'Station_ClearSkyGHI',
+            # Combined Radiation features
+            'Combined_GlobalRadiation [W m-2]',
             # PV output features
             'power_w', 'energy_wh', 'energy_interval',
             # Cyclic features already normalized
@@ -237,7 +240,12 @@ class DataProcessor:
             'Station_Temperature [degree_Celsius]',
             'Station_WindSpeed [m s-1]',
             'Station_Precipitation [mm]',
-            'Station_Pressure [hPa]'
+            'Station_Pressure [hPa]',
+            'Station_ClearSkyIndex',
+            # Combined measurements
+            'Combined_Temperature [degree_Celsius]',
+            'Combined_WindSpeed [m s-1]',
+            'Combined_ClearSkyIndex'
         ]
 
         # Filter columns that actually exist in the dataframe
@@ -258,8 +266,8 @@ class DataProcessor:
         return df
 
     def merge_datasets(self, inca_df: pd.DataFrame, station_df: pd.DataFrame,
-                       pv_df: pd.DataFrame) -> pd.DataFrame:
-        """Merge all datasets on timestamp index."""
+                        pv_df: pd.DataFrame) -> pd.DataFrame:
+        """Merge all datasets on timestamp index and combine overlapping features."""
         print("\nDataset shapes before merge:")
         print(f"INCA data: {inca_df.shape}")
         print(f"Station data: {station_df.shape}")
@@ -272,6 +280,37 @@ class DataProcessor:
         # Remove rows with missing values
         merged = merged.dropna()
         print(f"Merged shape after dropna: {merged.shape}")
+        
+        # Calculate station clear sky index if station radiation data exists
+        if 'Station_GlobalRadiation [W m-2]' in merged.columns:
+            # Calculate clear sky values for station data
+            station_clear_sky = self.calculate_clear_sky(merged)
+            merged['Station_ClearSkyGHI'] = station_clear_sky['INCA_ClearSkyGHI']
+            
+            # Calculate station clear sky index
+            merged['Station_ClearSkyIndex'] = np.where(
+                merged['Station_ClearSkyGHI'] > 10,
+                merged['Station_GlobalRadiation [W m-2]'] / merged['Station_ClearSkyGHI'],
+                0
+            )
+            merged['Station_ClearSkyIndex'] = merged['Station_ClearSkyIndex'].clip(0, 1.5)
+        
+        # Combine overlapping features
+        # 1. Global Radiation
+        if all(col in merged.columns for col in ['INCA_GlobalRadiation [W m-2]', 'Station_GlobalRadiation [W m-2]']):
+            merged['Combined_GlobalRadiation [W m-2]'] = merged[['INCA_GlobalRadiation [W m-2]', 'Station_GlobalRadiation [W m-2]']].mean(axis=1)
+            
+        # 2. Temperature
+        if all(col in merged.columns for col in ['INCA_Temperature [degree_Celsius]', 'Station_Temperature [degree_Celsius]']):
+            merged['Combined_Temperature [degree_Celsius]'] = merged[['INCA_Temperature [degree_Celsius]', 'Station_Temperature [degree_Celsius]']].mean(axis=1)
+            
+        # 3. Wind Speed
+        if all(col in merged.columns for col in ['INCA_WindSpeed [m s-1]', 'Station_WindSpeed [m s-1]']):
+            merged['Combined_WindSpeed [m s-1]'] = merged[['INCA_WindSpeed [m s-1]', 'Station_WindSpeed [m s-1]']].mean(axis=1)
+            
+        # 4. Clear Sky Index
+        if all(col in merged.columns for col in ['INCA_ClearSkyIndex', 'Station_ClearSkyIndex']):
+            merged['Combined_ClearSkyIndex'] = merged[['INCA_ClearSkyIndex', 'Station_ClearSkyIndex']].mean(axis=1)
         
         # Add derived features
         merged = self.add_derived_features(merged)
