@@ -131,7 +131,7 @@ The final results include:
 
 - Prediction vs. actual plots for test data
 - Scatter plots showing correlation between predicted and actual values
-- Comprehensive metrics including MSE, RMSE, MAE, and R²
+- Comprehensive metrics including MSE, RMSE, MAE, and RÂ²
 
 ## How to Use the Model
 
@@ -167,7 +167,7 @@ metrics = forecaster.run_pipeline(
 
 ## Results and Interpretation
 
-Based on our previous runs, the station feature set performed best with an RMSE of 611.11 and R² of 0.9228. The enhanced model with hyperparameter tuning is expected to further improve these metrics.
+Based on our previous runs, the station feature set performed best with an RMSE of 611.11 and RÂ² of 0.9228. The enhanced model with hyperparameter tuning is expected to further improve these metrics.
 
 The tuning results are saved in the `results/tuning` directory, with detailed CSV reports and comparison plots for each feature set. The final model comparison is saved in `results/model_comparison.csv`.
 

@@ -1,0 +1,7 @@
+config_id,feature_set,val_loss,is_best,lstm_units,dense_units,dropout_rates,learning_rate,bidirectional,batch_norm,l1_reg,l2_reg,optimizer
+1,station,0.008172204717993736,No,"[128, 64]","[32, 16]","[0.3, 0.3]",0.001,True,True,0.0,0.001,adam
+2,station,0.007884272374212742,Yes,"[128, 64, 32]","[32, 16]","[0.3, 0.3, 0.3]",0.001,True,True,0.0,0.001,adam
+3,station,0.008797217160463333,No,"[256, 128]","[64, 32]","[0.4, 0.4]",0.0008,True,True,0.0,0.002,adam
+4,station,0.009630916640162468,No,"[128, 64]","[32, 16]","[0.4, 0.4]",0.001,True,True,0.0001,0.002,adam
+5,station,0.008959842845797539,No,"[64, 32]",[16],"[0.2, 0.2]",0.001,False,False,0.0,0.0005,adam
+6,station,0.008165274746716022,No,"[128, 64]","[32, 16]","[0.25, 0.25]",0.0008,True,True,0.0,0.001,adam
