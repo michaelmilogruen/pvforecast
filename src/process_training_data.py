@@ -186,12 +186,18 @@ class DataProcessor:
     def add_derived_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Add derived time-based features."""
         # Add time-based features
-        df['hour'] = df.index.hour
+        # Calculate hour with 15-minute resolution (e.g., 15:15 becomes 15.25)
+        df['hour'] = df.index.hour + df.index.minute / 60
         df['day_of_year'] = df.index.dayofyear
         
-        # Add solar position features (simplified)
-        df['hour_sin'] = np.sin(2 * np.pi * df.index.hour / 24)
-        df['hour_cos'] = np.cos(2 * np.pi * df.index.hour / 24)
+        # Add circular encoding for hour
+        # Hour 0 corresponds to 0 radians (cos=1, sin=0)
+        # Hour 6 corresponds to π/2 radians (cos=0, sin=1)
+        # Hour 12 corresponds to π radians (cos=-1, sin=0)
+        # Hour 18 corresponds to 3π/2 radians (cos=0, sin=-1)
+        angle = 2 * np.pi * df['hour'] / 24
+        df['hour_sin'] = np.sin(angle)
+        df['hour_cos'] = np.cos(angle)
         df['day_sin'] = np.sin(2 * np.pi * df.index.dayofyear / 365)
         df['day_cos'] = np.cos(2 * np.pi * df.index.dayofyear / 365)
         
@@ -311,6 +317,19 @@ class DataProcessor:
         # 4. Clear Sky Index
         if all(col in merged.columns for col in ['INCA_ClearSkyIndex', 'Station_ClearSkyIndex']):
             merged['Combined_ClearSkyIndex'] = merged[['INCA_ClearSkyIndex', 'Station_ClearSkyIndex']].mean(axis=1)
+            
+        # 5. Handle isNight feature (if both datasets have it, use logical OR)
+        if 'isNight' in inca_df.columns and 'isNight' in station_df.columns:
+            # If either source says it's night, consider it night
+            merged['isNight'] = (merged['isNight_x'] | merged['isNight_y']).astype(int)
+            # Drop the duplicate columns
+            merged = merged.drop(['isNight_x', 'isNight_y'], axis=1)
+        elif 'isNight_x' in merged.columns:
+            merged['isNight'] = merged['isNight_x']
+            merged = merged.drop('isNight_x', axis=1)
+        elif 'isNight_y' in merged.columns:
+            merged['isNight'] = merged['isNight_y']
+            merged = merged.drop('isNight_y', axis=1)
         
         # Add derived features
         merged = self.add_derived_features(merged)
@@ -367,6 +386,9 @@ class DataProcessor:
         clear_sky['ghi'][night_mask] = 0
         clear_sky['dni'][night_mask] = 0
         clear_sky['dhi'][night_mask] = 0
+        
+        # Add isNight feature (1 for night, 0 for day)
+        df['isNight'] = night_mask.astype(int)
 
         # Add clear sky values to dataframe with INCA prefix
         df['INCA_ClearSkyGHI'] = clear_sky['ghi']
