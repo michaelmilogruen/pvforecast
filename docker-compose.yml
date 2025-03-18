@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  pvforecast:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      # Mount data directory to persist data between container runs
+      - ./data:/app/data
+      # Mount models directory to persist trained models
+      - ./models:/app/models
+      # Mount results directory to persist visualization outputs
+      - ./results:/app/results
+      # Mount logs directory to persist TensorBoard logs
+      - ./logs:/app/logs
+    # Use GPU if available
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # By default, run the forecast script
+    command: python src/forecast.py
+    # Restart policy
+    restart: unless-stopped
+    # Environment variables
+    environment:
+      - TF_FORCE_GPU_ALLOW_GROWTH=true
+      - PYTHONUNBUFFERED=1
