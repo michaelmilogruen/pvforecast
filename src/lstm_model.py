@@ -1,1140 +1,809 @@
-import pandas as pd
+
+# %% [markdown]
+# # LSTM Model for PV Power Forecasting
+# 
+# This notebook implements an LSTM (Long Short-Term Memory) neural network for forecasting photovoltaic power output.
+
+# %% [markdown]
+# ## Data Loading and Preprocessing
+
+# %%
+# Import necessary libraries
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout, Bidirectional, BatchNormalization
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
-from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.regularizers import l1_l2
-import os
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import joblib
-from datetime import datetime
+import os
 
-class LSTMForecaster:
-    def __init__(self, sequence_length=24, batch_size=32, epochs=50, model_config=None):
-        """
-        Initialize the LSTM forecaster with configuration.
+# %%
+# Load the processed training data
+data_path = 'data/processed_training_data.parquet'
+df = pd.read_parquet(data_path)
+
+# Display the first few rows
+print(f"Loaded data shape: {df.shape}")
+df.head()
+
+# %%
+# Feature selection
+# Select relevant features for the model
+
+# Original features that will be scaled
+features_to_scale = [
+    'INCA_GlobalRadiation [W m-2]',  # Global Horizontal Irradiance
+    'INCA_ClearSkyDHI',              # Diffuse Horizontal Irradiance
+    'INCA_ClearSkyDNI',              # Direct Normal Irradiance
+    'INCA_Temperature [degree_Celsius]',  # Temperature
+    'INCA_WindSpeed [m s-1]',        # Wind Speed
+    'INCA_ClearSkyIndex'             # Cloud Cover proxy
+]
+
+# Additional features that don't need scaling (already normalized or binary)
+# day_sin and day_cos are circular encodings with values between -1 and 1
+# isNight is a binary feature (0 for day, 1 for night)
+additional_features = ['day_sin', 'day_cos', 'isNight']
+
+# All features combined
+features = features_to_scale + additional_features
+
+target = 'power_w'  # Target variable (power output in watts)
+
+# Check for missing values
+print("Missing values in dataset:")
+print(df[features + [target]].isna().sum())
+
+# %%
+# Data normalization
+scaler_x = MinMaxScaler()
+scaler_y = MinMaxScaler()
+
+# Fit and transform only the features that need scaling
+scaled_features = scaler_x.fit_transform(df[features_to_scale])
+
+# Get the additional features that don't need scaling
+# These features (day_sin, day_cos, isNight) are already appropriately normalized or binary
+unscaled_features = df[additional_features].values
+
+# Combine scaled and unscaled features to create the complete feature set for training
+X = np.hstack((scaled_features, unscaled_features))
+
+# Print feature dimensions to verify all features are included
+print(f"Scaled features shape: {scaled_features.shape}")
+print(f"Unscaled features shape: {unscaled_features.shape}")
+print(f"Combined features shape: {X.shape}")
+
+# Reshape target to 2D array for scaling
+y = scaler_y.fit_transform(df[[target]])
+
+# Save the scalers for later use
+joblib.dump(scaler_x, 'models/scaler_x.pkl')
+joblib.dump(scaler_y, 'models/scaler_y.pkl')
+
+# %% [markdown]
+# ## Time Series Data Preparation
+
+# %%
+def create_sequences(X, y, time_steps=24):
+    """
+    Create sequences of data for time series forecasting.
+    
+    Args:
+        X: Features array
+        y: Target array
+        time_steps: Number of time steps to look back
         
-        Args:
-            sequence_length: Number of time steps to look back for prediction
-            batch_size: Batch size for training
-            epochs: Maximum number of epochs for training
-            model_config: Dictionary with model hyperparameters
-        """
+    Returns:
+        X_seq: Sequences of features
+        y_seq: Corresponding target values
+    """
+    X_seq, y_seq = [], []
+    
+    for i in range(len(X) - time_steps):
+        X_seq.append(X[i:i + time_steps])
+        y_seq.append(y[i + time_steps])
+        
+    return np.array(X_seq), np.array(y_seq)
+
+# %%
+# Create sequences for LSTM
+time_steps = 24  # Look back 24 time steps (e.g., hours)
+X_seq, y_seq = create_sequences(X, y, time_steps)
+
+print(f"Sequence shapes - X: {X_seq.shape}, y: {y_seq.shape}")
+
+# %%
+# Split data into training and testing sets
+train_size = int(len(X_seq) * 0.8)
+X_train, X_test = X_seq[:train_size], X_seq[train_size:]
+y_train, y_test = y_seq[:train_size], y_seq[train_size:]
+
+print(f"Training set shapes - X: {X_train.shape}, y: {y_train.shape}")
+print(f"Testing set shapes - X: {X_test.shape}, y: {y_test.shape}")
+
+# %% [markdown]
+# ## LSTM Model Definition
+
+# %%
+from tensorflow.keras.layers import Bidirectional, BatchNormalization
+from tensorflow.keras.regularizers import l1, l2
+
+def build_lstm_model(input_shape, config=None):
+    """
+    Build an LSTM model for time series forecasting.
+    
+    Args:
+        input_shape: Shape of input data (time_steps, features)
+        config: Dictionary containing model configuration parameters
+        
+    Returns:
+        model: Compiled LSTM model
+    """
+    if config is None:
+        # Default configuration
+        config = {
+            'lstm_units': [50, 50],
+            'dense_units': [50],
+            'dropout_rates': [0.2, 0.2],
+            'learning_rate': 0.001,
+            'bidirectional': False,
+            'batch_norm': False,
+            'l1_reg': 0.0,
+            'l2_reg': 0.0,
+            'optimizer': 'adam'
+        }
+    
+    model = Sequential()
+    
+    # Extract configuration parameters
+    lstm_units = config['lstm_units']
+    dense_units = config['dense_units']
+    dropout_rates = config['dropout_rates']
+    learning_rate = config['learning_rate']
+    bidirectional = config.get('bidirectional', False)
+    batch_norm = config.get('batch_norm', False)
+    l1_regularization = config.get('l1_reg', 0.0)
+    l2_regularization = config.get('l2_reg', 0.0)
+    
+    # Regularizer
+    regularizer = None
+    if l1_regularization > 0 or l2_regularization > 0:
+        regularizer = l1_l2(l1=l1_regularization, l2=l2_regularization)
+    
+    # First LSTM layer
+    if bidirectional:
+        model.add(Bidirectional(
+            LSTM(units=lstm_units[0], return_sequences=True if len(lstm_units) > 1 else False,
+                 kernel_regularizer=regularizer),
+            input_shape=input_shape))
+    else:
+        model.add(LSTM(units=lstm_units[0], return_sequences=True if len(lstm_units) > 1 else False,
+                       kernel_regularizer=regularizer, input_shape=input_shape))
+    
+    if batch_norm:
+        model.add(BatchNormalization())
+    
+    model.add(Dropout(dropout_rates[0]))
+    
+    # Middle LSTM layers (if any)
+    for i in range(1, len(lstm_units) - 1):
+        if bidirectional:
+            model.add(Bidirectional(LSTM(units=lstm_units[i], return_sequences=True,
+                                         kernel_regularizer=regularizer)))
+        else:
+            model.add(LSTM(units=lstm_units[i], return_sequences=True,
+                           kernel_regularizer=regularizer))
+        
+        if batch_norm:
+            model.add(BatchNormalization())
+        
+        model.add(Dropout(dropout_rates[min(i, len(dropout_rates) - 1)]))
+    
+    # Last LSTM layer (if more than one)
+    if len(lstm_units) > 1:
+        if bidirectional:
+            model.add(Bidirectional(LSTM(units=lstm_units[-1], return_sequences=False,
+                                         kernel_regularizer=regularizer)))
+        else:
+            model.add(LSTM(units=lstm_units[-1], return_sequences=False,
+                           kernel_regularizer=regularizer))
+        
+        if batch_norm:
+            model.add(BatchNormalization())
+        
+        model.add(Dropout(dropout_rates[min(len(lstm_units) - 1, len(dropout_rates) - 1)]))
+    
+    # Dense layers
+    for i, units in enumerate(dense_units):
+        model.add(Dense(units, activation='relu', kernel_regularizer=regularizer))
+        
+        if batch_norm:
+            model.add(BatchNormalization())
+        
+        if i < len(dense_units) - 1:  # No dropout after the last dense layer
+            model.add(Dropout(dropout_rates[min(len(lstm_units) + i, len(dropout_rates) - 1)]))
+    
+    # Output layer
+    model.add(Dense(1))
+    
+    # Compile the model
+    if config['optimizer'].lower() == 'adam':
+        optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+    elif config['optimizer'].lower() == 'rmsprop':
+        optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate)
+    else:
+        optimizer = config['optimizer']
+    
+    model.compile(optimizer=optimizer, loss='mse', metrics=['mae'])
+    
+    return model
+
+# %%
+# Define the specific configuration from the request
+station_config_2 = {
+    'config_id': 2,
+    'feature_set': 'station',
+    'lstm_units': [128, 64, 32],
+    'dense_units': [32, 16],
+    'dropout_rates': [0.3, 0.3, 0.3],
+    'learning_rate': 0.001,
+    'bidirectional': True,
+    'batch_norm': True,
+    'l1_reg': 0.0,
+    'l2_reg': 0.001,
+    'optimizer': 'adam'
+}
+
+# Build the LSTM model with the specified configuration
+input_shape = (X_train.shape[1], X_train.shape[2])  # (time_steps, features)
+model = build_lstm_model(input_shape, config=station_config_2)
+
+# Display model summary
+print(f"Model input shape: {input_shape} (time_steps, features)")
+print(f"Features include: {features_to_scale + additional_features}")
+print(f"Using configuration: {station_config_2['config_id']} - {station_config_2['feature_set']}")
+model.summary()
+
+# %% [markdown]
+# ## Hyperparameter Tuning
+
+# %%
+# Define hyperparameters to tune
+hyperparameters = {
+    'lstm_units': [32, 50, 64, 128],
+    'dropout_rate': [0.1, 0.2, 0.3],
+    'batch_size': [16, 32, 64],
+    'learning_rate': [0.001, 0.01]
+}
+
+# Function to build and evaluate model with specific hyperparameters
+def evaluate_model(lstm_units, dropout_rate, batch_size, learning_rate):
+    # Build model with specified hyperparameters
+    model = Sequential()
+    model.add(LSTM(units=lstm_units, return_sequences=True, input_shape=input_shape))
+    model.add(Dropout(dropout_rate))
+    model.add(LSTM(units=lstm_units))
+    model.add(Dropout(dropout_rate))
+    model.add(Dense(1))
+    
+    # Compile with specified learning rate
+    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+    model.compile(optimizer=optimizer, loss='mse', metrics=['mae'])
+    
+    # Train with early stopping
+    early_stopping = tf.keras.callbacks.EarlyStopping(
+        monitor='val_loss', patience=5, restore_best_weights=True
+    )
+    
+    history = model.fit(
+        X_train, y_train,
+        epochs=20,  # Reduced epochs for faster tuning
+        batch_size=batch_size,
+        validation_split=0.2,
+        callbacks=[early_stopping],
+        verbose=0
+    )
+    
+    # Evaluate on validation data
+    val_loss = min(history.history['val_loss'])
+    return val_loss, model
+
+# %%
+# Simple grid search implementation
+# Note: For a more comprehensive approach, consider using libraries like Keras Tuner or scikit-learn's GridSearchCV
+
+results = []
+
+# Uncomment to run the grid search (warning: may take significant time)
+'''
+for units in hyperparameters['lstm_units']:
+    for dropout in hyperparameters['dropout_rate']:
+        for batch in hyperparameters['batch_size']:
+            for lr in hyperparameters['learning_rate']:
+                print(f"Testing: units={units}, dropout={dropout}, batch_size={batch}, lr={lr}")
+                val_loss, _ = evaluate_model(units, dropout, batch, lr)
+                results.append({
+                    'lstm_units': units,
+                    'dropout_rate': dropout,
+                    'batch_size': batch,
+                    'learning_rate': lr,
+                    'val_loss': val_loss
+                })
+                
+# Convert results to DataFrame and sort by validation loss
+results_df = pd.DataFrame(results)
+results_df = results_df.sort_values('val_loss')
+results_df.head(10)  # Show top 10 configurations
+'''
+
+# For demonstration, we'll use the following hyperparameters
+best_params = {
+    'lstm_units': 64,
+    'dropout_rate': 0.2,
+    'batch_size': 32,
+    'learning_rate': 0.001
+}
+
+print("Using hyperparameters:")
+for param, value in best_params.items():
+    print(f"  {param}: {value}")
+
+# %% [markdown]
+# ## Model Training with Station Config 2
+
+# %%
+# Define callbacks for early stopping and model checkpointing
+early_stopping = tf.keras.callbacks.EarlyStopping(
+    monitor='val_loss',
+    patience=10,
+    restore_best_weights=True
+)
+
+# Create directory if it doesn't exist
+os.makedirs('models/lstm', exist_ok=True)
+os.makedirs('logs', exist_ok=True)
+
+model_checkpoint = tf.keras.callbacks.ModelCheckpoint(
+    filepath='models/lstm/station_config_2_model.keras',
+    monitor='val_loss',
+    save_best_only=True,
+    verbose=1
+)
+
+# Create a TensorBoard callback
+tensorboard_callback = tf.keras.callbacks.TensorBoard(
+    log_dir='logs/station_config_2',
+    histogram_freq=1
+)
+
+# %%
+# Train the model with the specified configuration
+batch_size = 32
+epochs = 50
+
+print(f"Training model with configuration ID {station_config_2['config_id']} - {station_config_2['feature_set']}")
+print(f"LSTM units: {station_config_2['lstm_units']}")
+print(f"Dense units: {station_config_2['dense_units']}")
+print(f"Dropout rates: {station_config_2['dropout_rates']}")
+print(f"Bidirectional: {station_config_2['bidirectional']}")
+print(f"Batch normalization: {station_config_2['batch_norm']}")
+print(f"L2 regularization: {station_config_2['l2_reg']}")
+
+history = model.fit(
+    X_train, y_train,
+    epochs=epochs,
+    batch_size=batch_size,
+    validation_split=0.2,
+    callbacks=[early_stopping, model_checkpoint, tensorboard_callback],
+    verbose=1
+)
+
+# %% [markdown]
+# ## Model Evaluation
+
+# %%
+# Plot training history
+plt.figure(figsize=(12, 5))
+
+# Plot loss
+plt.subplot(1, 2, 1)
+plt.plot(history.history['loss'], label='Training Loss')
+plt.plot(history.history['val_loss'], label='Validation Loss')
+plt.title('Model Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend()
+
+# Plot MAE
+plt.subplot(1, 2, 2)
+plt.plot(history.history['mae'], label='Training MAE')
+plt.plot(history.history['val_mae'], label='Validation MAE')
+plt.title('Model MAE')
+plt.xlabel('Epoch')
+plt.ylabel('MAE')
+plt.legend()
+
+plt.tight_layout()
+plt.savefig('results/lstm_training_history.png')
+plt.show()
+
+# %%
+# Make predictions on the test set
+y_pred = model.predict(X_test)
+
+# Inverse transform the predictions and actual values
+y_test_inv = scaler_y.inverse_transform(y_test)
+y_pred_inv = scaler_y.inverse_transform(y_pred)
+
+# Calculate performance metrics
+mse = mean_squared_error(y_test_inv, y_pred_inv)
+rmse = np.sqrt(mse)
+mae = mean_absolute_error(y_test_inv, y_pred_inv)
+r2 = r2_score(y_test_inv, y_pred_inv)
+
+print(f"Mean Squared Error (MSE): {mse:.4f}")
+print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
+print(f"Mean Absolute Error (MAE): {mae:.4f}")
+print(f"R² Score: {r2:.4f}")
+
+# %%
+# Plot predictions vs actual values
+plt.figure(figsize=(14, 7))
+
+# Plot a subset of the test data for better visualization
+sample_size = min(500, len(y_test_inv))
+indices = np.arange(sample_size)
+
+plt.plot(indices, y_test_inv[:sample_size], 'b-', label='Actual Power Output')
+plt.plot(indices, y_pred_inv[:sample_size], 'r-', label='Predicted Power Output')
+plt.title('LSTM Model: Actual vs Predicted PV Power Output')
+plt.xlabel('Time Steps')
+plt.ylabel('Power Output (kW)')
+plt.legend()
+plt.grid(True)
+
+plt.savefig('results/lstm_predictions.png')
+plt.show()
+
+# %%
+# Create a scatter plot of actual vs predicted values
+plt.figure(figsize=(10, 8))
+plt.scatter(y_test_inv, y_pred_inv, alpha=0.5)
+plt.plot([y_test_inv.min(), y_test_inv.max()], [y_test_inv.min(), y_test_inv.max()], 'r--')
+plt.title('LSTM Model: Actual vs Predicted Power Output')
+plt.xlabel('Actual Power Output (kW)')
+plt.ylabel('Predicted Power Output (kW)')
+plt.grid(True)
+
+plt.savefig('results/lstm_scatter.png')
+plt.show()
+
+# %% [markdown]
+# ## Save the Final Model
+
+# %%
+# Save the model with the specific configuration name
+model_save_path = f"models/lstm/station_config_{station_config_2['config_id']}_model.keras"
+model.save(model_save_path)
+print(f"Model saved successfully to {model_save_path}")
+
+# Also save as the default model for backward compatibility
+model.save('models/power_forecast_model.keras')
+print("Model also saved as the default model for backward compatibility.")
+
+# %% [markdown]
+# ## Conclusion
+#
+# This notebook demonstrates the implementation of an LSTM model for PV power forecasting. The model uses historical weather data and power output to predict future power generation. The performance metrics and visualizations provide insights into the model's accuracy and limitations.
+#
+# Next steps could include:
+# 1. Hyperparameter tuning to improve model performance
+# 2. Feature engineering to incorporate additional relevant variables
+# 3. Testing different model architectures (e.g., bidirectional LSTM, GRU)
+# 4. Implementing ensemble methods for more robust predictions
+
+# %%
+# Class implementation for use with run_lstm_models.py
+class LSTMForecaster:
+    def __init__(self, sequence_length=24, batch_size=32, epochs=50):
         self.sequence_length = sequence_length
         self.batch_size = batch_size
         self.epochs = epochs
-        self.models = {}
-        self.histories = {}
         
-        # Default model configuration
-        self.model_config = {
-            'lstm_units': [128, 64],  # Units in each LSTM layer
-            'dense_units': [32, 16],  # Units in each Dense layer
-            'dropout_rates': [0.3, 0.3],  # Dropout rates after each LSTM layer
+        # Configuration for station_config_2
+        self.config = {
+            'config_id': 2,
+            'feature_set': 'station',
+            'lstm_units': [128, 64, 32],
+            'dense_units': [32, 16],
+            'dropout_rates': [0.3, 0.3, 0.3],
             'learning_rate': 0.001,
-            'bidirectional': True,  # Whether to use bidirectional LSTM
-            'batch_norm': True,  # Whether to use batch normalization
-            'l1_reg': 0.0,  # L1 regularization factor
-            'l2_reg': 0.001,  # L2 regularization factor
-            'optimizer': 'adam'  # Optimizer to use
-        }
-        
-        # Update with custom configuration if provided
-        if model_config:
-            self.model_config.update(model_config)
-        
-        # Load existing scalers
-        try:
-            self.minmax_scaler = joblib.load('models/minmax_scaler.pkl')
-            self.standard_scaler = joblib.load('models/standard_scaler.pkl')
-            print("Successfully loaded existing scalers")
-        except Exception as e:
-            print(f"Warning: Could not load existing scalers: {e}")
-            print("Creating new scalers instead")
-            self.minmax_scaler = None
-            self.standard_scaler = None
-        
-        # Create directories for models and results
-        os.makedirs('models/lstm', exist_ok=True)
-        os.makedirs('results', exist_ok=True)
-        
-    def load_data(self, filepath):
-        """
-        Load data from parquet file.
-        
-        Args:
-            filepath: Path to the parquet file
-            
-        Returns:
-            DataFrame with loaded data
-        """
-        print(f"Loading data from {filepath}...")
-        return pd.read_parquet(filepath)
-    
-    def prepare_feature_sets(self, df):
-        """
-        Prepare the three feature sets from the dataframe.
-        
-        Args:
-            df: DataFrame with all features
-            
-        Returns:
-            Dictionary with three feature sets
-        """
-        # Define the feature sets
-        feature_sets = {
-            'inca': [
-                'INCA_GlobalRadiation [W m-2]',
-                'INCA_Temperature [degree_Celsius]',
-                'INCA_WindSpeed [m s-1]',
-                'INCA_ClearSkyIndex',
-                'hour_sin',  # Using hour_sin/cos as circular time features
-                'hour_cos'
-            ],
-            'station': [
-                'Station_GlobalRadiation [W m-2]',
-                'Station_Temperature [degree_Celsius]',
-                'Station_WindSpeed [m s-1]',
-                'Station_ClearSkyIndex',
-                'hour_sin',
-                'hour_cos'
-            ],
-            'combined': [
-                'Combined_GlobalRadiation [W m-2]',
-                'Combined_Temperature [degree_Celsius]',
-                'Combined_WindSpeed [m s-1]',
-                'Combined_ClearSkyIndex',
-                'hour_sin',
-                'hour_cos'
-            ]
-        }
-        
-        # Verify all features exist in the dataframe
-        for set_name, features in feature_sets.items():
-            missing_features = [f for f in features if f not in df.columns]
-            if missing_features:
-                print(f"Warning: Missing features in {set_name} set: {missing_features}")
-                # Remove missing features from the set
-                feature_sets[set_name] = [f for f in features if f in df.columns]
-        
-        return feature_sets
-    
-    def split_data(self, df, test_size=0.2, val_size=0.2):
-        """
-        Split data into training, validation, and test sets.
-        
-        Args:
-            df: DataFrame with all data
-            test_size: Proportion of data to use for testing
-            val_size: Proportion of training data to use for validation
-            
-        Returns:
-            Dictionary with train, val, and test DataFrames
-        """
-        # Sort by index to ensure chronological order
-        df = df.sort_index()
-        
-        # Calculate split indices
-        n = len(df)
-        test_idx = int(n * (1 - test_size))
-        val_idx = int(test_idx * (1 - val_size))
-        
-        # Split the data
-        train_df = df.iloc[:val_idx].copy()
-        val_df = df.iloc[val_idx:test_idx].copy()
-        test_df = df.iloc[test_idx:].copy()
-        
-        print(f"Data split: Train={train_df.shape}, Validation={val_df.shape}, Test={test_df.shape}")
-        
-        return {
-            'train': train_df,
-            'val': val_df,
-            'test': test_df
+            'bidirectional': True,
+            'batch_norm': True,
+            'l1_reg': 0.0,
+            'l2_reg': 0.001,
+            'optimizer': 'adam'
         }
     
-    def create_sequences(self, data, target_col):
-        """
-        Create sequences for LSTM input.
+    def run_pipeline(self, data_path):
+        """Run the full LSTM forecasting pipeline"""
+        print(f"Running LSTM forecasting pipeline with {self.config['feature_set']} configuration {self.config['config_id']}")
         
-        Args:
-            data: Array of feature data
-            target_col: Array of target data
-            
-        Returns:
-            X: Sequences of features
-            y: Corresponding target values
-        """
-        X, y = [], []
-        for i in range(len(data) - self.sequence_length):
-            X.append(data[i:i + self.sequence_length])
-            y.append(target_col[i + self.sequence_length])
-        return np.array(X), np.array(y)
-    
-    def prepare_data_for_lstm(self, data_dict, feature_set, target_col='power_w'):
-        """
-        Prepare data for LSTM model by creating sequences.
-        Note: Data is already normalized from the processing step.
+        # Load data
+        df = pd.read_parquet(data_path)
+        print(f"Loaded data shape: {df.shape}")
         
-        Args:
-            data_dict: Dictionary with train, val, and test DataFrames
-            feature_set: List of feature columns to use
-            target_col: Target column name
-            
-        Returns:
-            Dictionary with prepared X and y data for train, val, and test
-        """
-        prepared_data = {}
+        # Feature selection (same as in the notebook)
+        features_to_scale = [
+            'INCA_GlobalRadiation [W m-2]',
+            'INCA_ClearSkyDHI',
+            'INCA_ClearSkyDNI',
+            'INCA_Temperature [degree_Celsius]',
+            'INCA_WindSpeed [m s-1]',
+            'INCA_ClearSkyIndex'
+        ]
+        additional_features = ['day_sin', 'day_cos', 'isNight']
+        features = features_to_scale + additional_features
+        target = 'power_w'
         
-        # Process each dataset
-        for split, df in data_dict.items():
-            # Get features and target (already normalized)
-            X_data = df[feature_set].values
-            y_data = df[target_col].values
-            
-            # Create sequences
-            X, y = self.create_sequences(X_data, y_data)
-            
-            prepared_data[split] = {
-                'X': X,
-                'y': y,
-                'X_raw': df[feature_set].values,
-                'y_raw': df[target_col].values
-            }
+        # Data normalization
+        scaler_x = MinMaxScaler()
+        scaler_y = MinMaxScaler()
         
-        return prepared_data
-    
-    def build_lstm_model(self, input_shape, config=None):
-        """
-        Build LSTM model architecture with configurable hyperparameters.
+        scaled_features = scaler_x.fit_transform(df[features_to_scale])
+        unscaled_features = df[additional_features].values
+        X = np.hstack((scaled_features, unscaled_features))
+        y = scaler_y.fit_transform(df[[target]])
         
-        Args:
-            input_shape: Shape of input data (sequence_length, n_features)
-            config: Optional custom configuration for this specific model
-            
-        Returns:
-            Compiled LSTM model
-        """
-        # Use provided config or default
-        cfg = config if config else self.model_config
+        # Save the scalers
+        os.makedirs('models', exist_ok=True)
+        joblib.dump(scaler_x, 'models/scaler_x.pkl')
+        joblib.dump(scaler_y, 'models/scaler_y.pkl')
         
-        # Create regularizer if specified
-        regularizer = None
-        if cfg['l1_reg'] > 0 or cfg['l2_reg'] > 0:
-            regularizer = l1_l2(l1=cfg['l1_reg'], l2=cfg['l2_reg'])
+        # Create sequences
+        X_seq, y_seq = self._create_sequences(X, y, self.sequence_length)
+        print(f"Sequence shapes - X: {X_seq.shape}, y: {y_seq.shape}")
         
-        # Build model
-        model = Sequential()
+        # Split data
+        train_size = int(len(X_seq) * 0.8)
+        X_train, X_test = X_seq[:train_size], X_seq[train_size:]
+        y_train, y_test = y_seq[:train_size], y_seq[train_size:]
         
-        # First LSTM layer
-        if cfg['bidirectional']:
-            model.add(Bidirectional(
-                LSTM(cfg['lstm_units'][0],
-                     return_sequences=len(cfg['lstm_units']) > 1,
-                     kernel_regularizer=regularizer,
-                     recurrent_regularizer=regularizer),
-                input_shape=input_shape
-            ))
-        else:
-            model.add(LSTM(
-                cfg['lstm_units'][0],
-                return_sequences=len(cfg['lstm_units']) > 1,
-                kernel_regularizer=regularizer,
-                recurrent_regularizer=regularizer,
-                input_shape=input_shape
-            ))
-        
-        if cfg['batch_norm']:
-            model.add(BatchNormalization())
-            
-        model.add(Dropout(cfg['dropout_rates'][0]))
-        
-        # Additional LSTM layers
-        for i in range(1, len(cfg['lstm_units'])):
-            if cfg['bidirectional']:
-                model.add(Bidirectional(
-                    LSTM(cfg['lstm_units'][i],
-                         return_sequences=i < len(cfg['lstm_units']) - 1,
-                         kernel_regularizer=regularizer,
-                         recurrent_regularizer=regularizer)
-                ))
-            else:
-                model.add(LSTM(
-                    cfg['lstm_units'][i],
-                    return_sequences=i < len(cfg['lstm_units']) - 1,
-                    kernel_regularizer=regularizer,
-                    recurrent_regularizer=regularizer
-                ))
-            
-            if cfg['batch_norm']:
-                model.add(BatchNormalization())
-                
-            if i < len(cfg['dropout_rates']):
-                model.add(Dropout(cfg['dropout_rates'][i]))
-        
-        # Dense layers
-        for units in cfg['dense_units']:
-            model.add(Dense(units, activation='relu', kernel_regularizer=regularizer))
-            
-        # Output layer
-        model.add(Dense(1))
-        
-        # Compile model
-        if cfg['optimizer'].lower() == 'adam':
-            optimizer = Adam(learning_rate=cfg['learning_rate'])
-        else:
-            optimizer = cfg['optimizer']
-            
-        model.compile(optimizer=optimizer, loss='mse', metrics=['mae'])
-        return model
-    
-    def train_model(self, prepared_data, feature_set_name, custom_config=None):
-        """
-        Train LSTM model on prepared data.
-        
-        Args:
-            prepared_data: Dictionary with prepared X and y data
-            feature_set_name: Name of the feature set for model identification
-            custom_config: Optional custom configuration for this specific model
-            
-        Returns:
-            Trained model and training history
-        """
-        print(f"\nTraining model for {feature_set_name} feature set...")
-        
-        # Get input shape from training data
-        input_shape = (prepared_data['train']['X'].shape[1], prepared_data['train']['X'].shape[2])
-        
-        # Use feature-specific configurations if available
-        config = custom_config if custom_config else self.model_config
-        
-        # Feature-specific optimizations based on previous results
-        if feature_set_name == 'station' and not custom_config:
-            # Station data performed best, optimize further
-            config = self.model_config.copy()
-            config['lstm_units'] = [128, 64]
-            config['dropout_rates'] = [0.25, 0.25]
-            config['learning_rate'] = 0.0008
-        elif feature_set_name == 'inca' and not custom_config:
-            # Inca data had more overfitting, increase regularization
-            config = self.model_config.copy()
-            config['dropout_rates'] = [0.35, 0.35]
-            config['l2_reg'] = 0.002
-        
-        # Build model
-        model = self.build_lstm_model(input_shape, config)
+        # Build and train model
+        input_shape = (X_train.shape[1], X_train.shape[2])
+        model = self._build_model(input_shape)
         
         # Define callbacks
-        callbacks = [
-            EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True),
-            ModelCheckpoint(f'models/lstm/{feature_set_name}_model.keras', save_best_only=True),
-            ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=0.00001, verbose=1)
-        ]
+        callbacks = self._create_callbacks()
         
         # Train model
         history = model.fit(
-            prepared_data['train']['X'], prepared_data['train']['y'],
-            validation_data=(prepared_data['val']['X'], prepared_data['val']['y']),
+            X_train, y_train,
             epochs=self.epochs,
             batch_size=self.batch_size,
+            validation_split=0.2,
             callbacks=callbacks,
             verbose=1
         )
         
-        # Save model and history
-        self.models[feature_set_name] = model
-        self.histories[feature_set_name] = history
+        # Evaluate model
+        metrics = self._evaluate_model(model, X_test, y_test, scaler_y)
         
-        return model, history
+        # Save model
+        model_path = f"models/lstm/{self.config['feature_set']}_config_{self.config['config_id']}_model.keras"
+        model.save(model_path)
+        print(f"Model saved to {model_path}")
+        
+        # Plot results
+        self._plot_results(history, y_test, model.predict(X_test), scaler_y)
+        
+        return {self.config['feature_set']: metrics}
     
-    def evaluate_model(self, model, prepared_data, feature_set_name):
-        """
-        Evaluate model on test data.
+    def _create_sequences(self, X, y, time_steps):
+        """Create sequences for time series forecasting"""
+        X_seq, y_seq = [], []
+        for i in range(len(X) - time_steps):
+            X_seq.append(X[i:i + time_steps])
+            y_seq.append(y[i + time_steps])
+        return np.array(X_seq), np.array(y_seq)
+    
+    def _build_model(self, input_shape):
+        """Build the LSTM model with the specified configuration"""
+        model = Sequential()
         
-        Args:
-            model: Trained LSTM model
-            prepared_data: Dictionary with prepared X and y data
-            feature_set_name: Name of the feature set for identification
-            
-        Returns:
-            Dictionary with evaluation metrics
-        """
-        print(f"\nEvaluating model for {feature_set_name} feature set...")
+        # Extract configuration parameters
+        lstm_units = self.config['lstm_units']
+        dense_units = self.config['dense_units']
+        dropout_rates = self.config['dropout_rates']
+        learning_rate = self.config['learning_rate']
+        bidirectional = self.config.get('bidirectional', False)
+        batch_norm = self.config.get('batch_norm', False)
+        l1_regularization = self.config.get('l1_reg', 0.0)
+        l2_regularization = self.config.get('l2_reg', 0.0)
         
-        # Get predictions on test data (already normalized)
-        y_pred = model.predict(prepared_data['test']['X']).flatten()
+        # Regularizer
+        regularizer = None
+        if l1_regularization > 0 or l2_regularization > 0:
+            regularizer = l1_l2(l1=l1_regularization, l2=l2_regularization)
         
-        # Get actual values (need to account for sequence length)
-        y_true = prepared_data['test']['y'][:]
-        
-        # Calculate metrics on normalized data
-        norm_metrics = {
-            'mse': mean_squared_error(y_true, y_pred),
-            'rmse': np.sqrt(mean_squared_error(y_true, y_pred)),
-            'mae': mean_absolute_error(y_true, y_pred),
-            'r2': r2_score(y_true, y_pred)
-        }
-        
-        # Get the original scale data for more interpretable metrics
-        # We need to reshape for inverse_transform
-        y_pred_reshaped = y_pred.reshape(-1, 1)
-        y_true_reshaped = y_true.reshape(-1, 1)
-        
-        # Try to convert back to original scale if we have the scaler
-        if self.minmax_scaler is not None:
-            try:
-                # Since 'power_w' is in minmax_columns in the original processing
-                # We need to create a dummy array with zeros for all other minmax features
-                # to properly use the inverse_transform
-                minmax_feature_count = len(self.minmax_scaler.feature_names_in_)
-                
-                # Find the index of 'power_w' in the minmax scaler features
-                power_w_idx = np.where(self.minmax_scaler.feature_names_in_ == 'power_w')[0][0]
-                
-                # Create dummy arrays for inverse transform
-                y_pred_dummy = np.zeros((len(y_pred), minmax_feature_count))
-                y_pred_dummy[:, power_w_idx] = y_pred
-                
-                y_true_dummy = np.zeros((len(y_true), minmax_feature_count))
-                y_true_dummy[:, power_w_idx] = y_true
-                
-                # Inverse transform
-                y_pred_orig = self.minmax_scaler.inverse_transform(y_pred_dummy)[:, power_w_idx]
-                y_true_orig = self.minmax_scaler.inverse_transform(y_true_dummy)[:, power_w_idx]
-            except Exception as e:
-                print(f"Warning: Could not inverse transform with minmax_scaler: {e}")
-                print("Using normalized values for metrics")
-                y_pred_orig = y_pred
-                y_true_orig = y_true
+        # First LSTM layer
+        if bidirectional:
+            model.add(Bidirectional(
+                LSTM(units=lstm_units[0], return_sequences=True if len(lstm_units) > 1 else False,
+                     kernel_regularizer=regularizer),
+                input_shape=input_shape))
         else:
-            print("Warning: No minmax_scaler available, using normalized values for metrics")
-            y_pred_orig = y_pred
-            y_true_orig = y_true
+            model.add(LSTM(units=lstm_units[0], return_sequences=True if len(lstm_units) > 1 else False,
+                           kernel_regularizer=regularizer, input_shape=input_shape))
         
-        # Calculate metrics on original scale
-        orig_metrics = {
-            'mse': mean_squared_error(y_true_orig, y_pred_orig),
-            'rmse': np.sqrt(mean_squared_error(y_true_orig, y_pred_orig)),
-            'mae': mean_absolute_error(y_true_orig, y_pred_orig),
-            'r2': r2_score(y_true_orig, y_pred_orig)
-        }
+        if batch_norm:
+            model.add(BatchNormalization())
         
-        print(f"Test MSE (normalized): {norm_metrics['mse']:.4f}")
-        print(f"Test RMSE (normalized): {norm_metrics['rmse']:.4f}")
-        print(f"Test MAE (normalized): {norm_metrics['mae']:.4f}")
-        print(f"Test R² (normalized): {norm_metrics['r2']:.4f}")
+        model.add(Dropout(dropout_rates[0]))
         
-        print(f"\nTest MSE (original scale): {orig_metrics['mse']:.2f}")
-        print(f"Test RMSE (original scale): {orig_metrics['rmse']:.2f}")
-        print(f"Test MAE (original scale): {orig_metrics['mae']:.2f}")
-        print(f"Test R² (original scale): {orig_metrics['r2']:.4f}")
-        
-        # Plot predictions vs actual
-        self.plot_predictions(y_true_orig, y_pred_orig, feature_set_name)
-        
-        return orig_metrics
-    
-    def plot_predictions(self, y_true, y_pred, feature_set_name):
-        """
-        Plot predictions vs actual values.
-        
-        Args:
-            y_true: Array of actual values
-            y_pred: Array of predicted values
-            feature_set_name: Name of the feature set for plot title
-        """
-        plt.figure(figsize=(12, 6))
-        plt.plot(y_true, label='Actual')
-        plt.plot(y_pred, label='Predicted')
-        plt.title(f'Actual vs Predicted Power - {feature_set_name} Model')
-        plt.xlabel('Time Steps')
-        plt.ylabel('Power (W)')
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(f'results/{feature_set_name}_predictions.png')
-        plt.close()
-        
-        # Also plot a scatter plot
-        plt.figure(figsize=(8, 8))
-        plt.scatter(y_true, y_pred, alpha=0.5)
-        plt.plot([min(y_true), max(y_true)], [min(y_true), max(y_true)], 'r--')
-        plt.title(f'Actual vs Predicted Power - {feature_set_name} Model')
-        plt.xlabel('Actual Power (W)')
-        plt.ylabel('Predicted Power (W)')
-        plt.tight_layout()
-        plt.savefig(f'results/{feature_set_name}_scatter.png')
-        plt.close()
-    
-    def plot_training_history(self, feature_set_name, config_name=None):
-        """
-        Plot training history.
-        
-        Args:
-            feature_set_name: Name of the feature set for plot title
-            config_name: Optional specific configuration name to plot
-        """
-        if config_name:
-            # Plot specific configuration history
-            if f"{feature_set_name}_all" in self.histories and config_name in self.histories[f"{feature_set_name}_all"]:
-                history = self.histories[f"{feature_set_name}_all"][config_name]
-                output_name = f"{config_name}"
+        # Middle LSTM layers (if any)
+        for i in range(1, len(lstm_units) - 1):
+            if bidirectional:
+                model.add(Bidirectional(LSTM(units=lstm_units[i], return_sequences=True,
+                                             kernel_regularizer=regularizer)))
             else:
-                print(f"Warning: History for {config_name} not found")
-                return
-        else:
-            # Plot best model history
-            if feature_set_name not in self.histories:
-                print(f"Warning: History for {feature_set_name} not found")
-                return
-            history = self.histories[feature_set_name]
-            output_name = feature_set_name
+                model.add(LSTM(units=lstm_units[i], return_sequences=True,
+                               kernel_regularizer=regularizer))
+            
+            if batch_norm:
+                model.add(BatchNormalization())
+            
+            model.add(Dropout(dropout_rates[min(i, len(dropout_rates) - 1)]))
         
+        # Last LSTM layer (if more than one)
+        if len(lstm_units) > 1:
+            if bidirectional:
+                model.add(Bidirectional(LSTM(units=lstm_units[-1], return_sequences=False,
+                                             kernel_regularizer=regularizer)))
+            else:
+                model.add(LSTM(units=lstm_units[-1], return_sequences=False,
+                               kernel_regularizer=regularizer))
+            
+            if batch_norm:
+                model.add(BatchNormalization())
+            
+            model.add(Dropout(dropout_rates[min(len(lstm_units) - 1, len(dropout_rates) - 1)]))
+        
+        # Dense layers
+        for i, units in enumerate(dense_units):
+            model.add(Dense(units, activation='relu', kernel_regularizer=regularizer))
+            
+            if batch_norm:
+                model.add(BatchNormalization())
+            
+            if i < len(dense_units) - 1:  # No dropout after the last dense layer
+                model.add(Dropout(dropout_rates[min(len(lstm_units) + i, len(dropout_rates) - 1)]))
+        
+        # Output layer
+        model.add(Dense(1))
+        
+        # Compile the model
+        if self.config['optimizer'].lower() == 'adam':
+            optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+        elif self.config['optimizer'].lower() == 'rmsprop':
+            optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate)
+        else:
+            optimizer = self.config['optimizer']
+        
+        model.compile(optimizer=optimizer, loss='mse', metrics=['mae'])
+        
+        return model
+    
+    def _create_callbacks(self):
+        """Create callbacks for model training"""
+        os.makedirs('models/lstm', exist_ok=True)
+        os.makedirs(f'logs/{self.config["feature_set"]}_config_{self.config["config_id"]}', exist_ok=True)
+        
+        early_stopping = tf.keras.callbacks.EarlyStopping(
+            monitor='val_loss',
+            patience=10,
+            restore_best_weights=True
+        )
+        
+        model_checkpoint = tf.keras.callbacks.ModelCheckpoint(
+            filepath=f'models/lstm/{self.config["feature_set"]}_config_{self.config["config_id"]}_model.keras',
+            monitor='val_loss',
+            save_best_only=True,
+            verbose=1
+        )
+        
+        tensorboard_callback = tf.keras.callbacks.TensorBoard(
+            log_dir=f'logs/{self.config["feature_set"]}_config_{self.config["config_id"]}',
+            histogram_freq=1
+        )
+        
+        return [early_stopping, model_checkpoint, tensorboard_callback]
+    
+    def _evaluate_model(self, model, X_test, y_test, scaler_y):
+        """Evaluate the model and return metrics"""
+        y_pred = model.predict(X_test)
+        
+        # Inverse transform
+        y_test_inv = scaler_y.inverse_transform(y_test)
+        y_pred_inv = scaler_y.inverse_transform(y_pred)
+        
+        # Calculate metrics
+        mse = mean_squared_error(y_test_inv, y_pred_inv)
+        rmse = np.sqrt(mse)
+        mae = mean_absolute_error(y_test_inv, y_pred_inv)
+        r2 = r2_score(y_test_inv, y_pred_inv)
+        
+        print(f"\nModel Evaluation ({self.config['feature_set']} config {self.config['config_id']}):")
+        print(f"Mean Squared Error (MSE): {mse:.4f}")
+        print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
+        print(f"Mean Absolute Error (MAE): {mae:.4f}")
+        print(f"R² Score: {r2:.4f}")
+        
+        return {
+            'mse': mse,
+            'rmse': rmse,
+            'mae': mae,
+            'r2': r2
+        }
+    
+    def _plot_results(self, history, y_test, y_pred, scaler_y):
+        """Plot and save training history and prediction results"""
+        os.makedirs('results', exist_ok=True)
+        
+        # Inverse transform
+        y_test_inv = scaler_y.inverse_transform(y_test)
+        y_pred_inv = scaler_y.inverse_transform(y_pred)
+        
+        # Plot training history
         plt.figure(figsize=(12, 5))
         
-        # Plot loss
         plt.subplot(1, 2, 1)
-        plt.plot(history.history['loss'], label='Train')
-        plt.plot(history.history['val_loss'], label='Validation')
-        plt.title(f'Loss - {output_name} Model')
+        plt.plot(history.history['loss'], label='Training Loss')
+        plt.plot(history.history['val_loss'], label='Validation Loss')
+        plt.title(f'{self.config["feature_set"].capitalize()} Config {self.config["config_id"]} - Model Loss')
         plt.xlabel('Epoch')
-        plt.ylabel('Loss (MSE)')
+        plt.ylabel('Loss')
         plt.legend()
         
-        # Plot MAE
         plt.subplot(1, 2, 2)
-        plt.plot(history.history['mae'], label='Train')
-        plt.plot(history.history['val_mae'], label='Validation')
-        plt.title(f'Mean Absolute Error - {output_name} Model')
+        plt.plot(history.history['mae'], label='Training MAE')
+        plt.plot(history.history['val_mae'], label='Validation MAE')
+        plt.title(f'{self.config["feature_set"].capitalize()} Config {self.config["config_id"]} - Model MAE')
         plt.xlabel('Epoch')
         plt.ylabel('MAE')
         plt.legend()
         
         plt.tight_layout()
-        plt.savefig(f'results/{output_name}_history.png')
-        plt.close()
-    
-    def plot_all_training_histories(self, feature_set_name):
-        """
-        Plot training histories for all configurations of a feature set.
+        plt.savefig(f'results/{self.config["feature_set"]}_config_{self.config["config_id"]}_history.png')
         
-        Args:
-            feature_set_name: Name of the feature set
-        """
-        if f"{feature_set_name}_all" not in self.histories:
-            print(f"Warning: No configuration histories found for {feature_set_name}")
-            return
+        # Plot predictions vs actual
+        plt.figure(figsize=(14, 7))
         
-        all_histories = self.histories[f"{feature_set_name}_all"]
+        sample_size = min(500, len(y_test_inv))
+        indices = np.arange(sample_size)
         
-        # Create directory for comparison plots
-        os.makedirs('results/tuning', exist_ok=True)
-        
-        # Plot loss comparison
-        plt.figure(figsize=(12, 8))
-        
-        # Plot validation loss for each configuration
-        for config_name, history in all_histories.items():
-            config_id = config_name.split('_')[-1]  # Extract config number
-            plt.plot(history.history['val_loss'], label=f'Config {config_id}')
-        
-        plt.title(f'Validation Loss Comparison - {feature_set_name}')
-        plt.xlabel('Epoch')
-        plt.ylabel('Validation Loss (MSE)')
+        plt.plot(indices, y_test_inv[:sample_size], 'b-', label='Actual Power Output')
+        plt.plot(indices, y_pred_inv[:sample_size], 'r-', label='Predicted Power Output')
+        plt.title(f'{self.config["feature_set"].capitalize()} Config {self.config["config_id"]} - Actual vs Predicted PV Power')
+        plt.xlabel('Time Steps')
+        plt.ylabel('Power Output (W)')
         plt.legend()
-        plt.grid(True, linestyle='--', alpha=0.7)
-        plt.tight_layout()
-        plt.savefig(f'results/tuning/{feature_set_name}_val_loss_comparison.png')
-        plt.close()
+        plt.grid(True)
         
-        # Plot MAE comparison
-        plt.figure(figsize=(12, 8))
+        plt.savefig(f'results/{self.config["feature_set"]}_config_{self.config["config_id"]}_predictions.png')
         
-        # Plot validation MAE for each configuration
-        for config_name, history in all_histories.items():
-            config_id = config_name.split('_')[-1]  # Extract config number
-            plt.plot(history.history['val_mae'], label=f'Config {config_id}')
+        # Create scatter plot
+        plt.figure(figsize=(10, 8))
+        plt.scatter(y_test_inv, y_pred_inv, alpha=0.5)
+        plt.plot([y_test_inv.min(), y_test_inv.max()], [y_test_inv.min(), y_test_inv.max()], 'r--')
+        plt.title(f'{self.config["feature_set"].capitalize()} Config {self.config["config_id"]} - Actual vs Predicted')
+        plt.xlabel('Actual Power Output (W)')
+        plt.ylabel('Predicted Power Output (W)')
+        plt.grid(True)
         
-        plt.title(f'Validation MAE Comparison - {feature_set_name}')
-        plt.xlabel('Epoch')
-        plt.ylabel('Validation MAE')
-        plt.legend()
-        plt.grid(True, linestyle='--', alpha=0.7)
-        plt.tight_layout()
-        plt.savefig(f'results/tuning/{feature_set_name}_val_mae_comparison.png')
-        plt.close()
-    
-    def save_results(self, metrics_dict):
-        """
-        Save evaluation metrics to CSV.
-        
-        Args:
-            metrics_dict: Dictionary with metrics for each feature set
-        """
-        results_df = pd.DataFrame(metrics_dict).T
-        results_df.index.name = 'feature_set'
-        results_df.to_csv('results/model_comparison.csv')
-        print(f"\nResults saved to results/model_comparison.csv")
-        
-        # Also save as a formatted markdown table
-        try:
-            with open('results/model_comparison.md', 'w') as f:
-                f.write("# LSTM Model Comparison\n\n")
-                f.write(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-                try:
-                    f.write(results_df.to_markdown())
-                except ImportError:
-                    # If tabulate is not available, use a simple string representation
-                    f.write("```\n")
-                    f.write(str(results_df))
-                    f.write("\n```")
-        except Exception as e:
-            print(f"Warning: Could not save markdown file: {e}")
-    
-    def tune_hyperparameters(self, prepared_data, feature_set_name):
-        """
-        Perform hyperparameter tuning to find the best model configuration.
-        
-        Args:
-            prepared_data: Dictionary with prepared X and y data
-            feature_set_name: Name of the feature set for model identification
-            
-        Returns:
-            Best model configuration based on validation performance
-        """
-        print(f"\nPerforming hyperparameter tuning for {feature_set_name} feature set...")
-        
-        # Define hyperparameter configurations to try
-        configs = [
-            # Configuration 1: Baseline enhanced model
-            {
-                'lstm_units': [128, 64],
-                'dense_units': [32, 16],
-                'dropout_rates': [0.3, 0.3],
-                'learning_rate': 0.001,
-                'bidirectional': True,
-                'batch_norm': True,
-                'l1_reg': 0.0,
-                'l2_reg': 0.001,
-                'optimizer': 'adam'
-            },
-            # Configuration 2: Deeper model
-            {
-                'lstm_units': [128, 64, 32],
-                'dense_units': [32, 16],
-                'dropout_rates': [0.3, 0.3, 0.3],
-                'learning_rate': 0.001,
-                'bidirectional': True,
-                'batch_norm': True,
-                'l1_reg': 0.0,
-                'l2_reg': 0.001,
-                'optimizer': 'adam'
-            },
-            # Configuration 3: Higher capacity
-            {
-                'lstm_units': [256, 128],
-                'dense_units': [64, 32],
-                'dropout_rates': [0.4, 0.4],
-                'learning_rate': 0.0008,
-                'bidirectional': True,
-                'batch_norm': True,
-                'l1_reg': 0.0,
-                'l2_reg': 0.002,
-                'optimizer': 'adam'
-            },
-            # Configuration 4: More regularization
-            {
-                'lstm_units': [128, 64],
-                'dense_units': [32, 16],
-                'dropout_rates': [0.4, 0.4],
-                'learning_rate': 0.001,
-                'bidirectional': True,
-                'batch_norm': True,
-                'l1_reg': 0.0001,
-                'l2_reg': 0.002,
-                'optimizer': 'adam'
-            },
-            # Configuration 5: Simpler model with less regularization
-            {
-                'lstm_units': [64, 32],
-                'dense_units': [16],
-                'dropout_rates': [0.2, 0.2],
-                'learning_rate': 0.001,
-                'bidirectional': False,
-                'batch_norm': False,
-                'l1_reg': 0.0,
-                'l2_reg': 0.0005,
-                'optimizer': 'adam'
-            }
-        ]
-        
-        # Feature-specific configurations
-        if feature_set_name == 'station':
-            # Add station-specific configurations
-            configs.append({
-                'lstm_units': [128, 64],
-                'dense_units': [32, 16],
-                'dropout_rates': [0.25, 0.25],
-                'learning_rate': 0.0008,
-                'bidirectional': True,
-                'batch_norm': True,
-                'l1_reg': 0.0,
-                'l2_reg': 0.001,
-                'optimizer': 'adam'
-            })
-        elif feature_set_name == 'inca':
-            # Add inca-specific configurations
-            configs.append({
-                'lstm_units': [128, 64],
-                'dense_units': [32, 16],
-                'dropout_rates': [0.35, 0.35],
-                'learning_rate': 0.001,
-                'bidirectional': True,
-                'batch_norm': True,
-                'l1_reg': 0.0,
-                'l2_reg': 0.002,
-                'optimizer': 'adam'
-            })
-        
-        # Dictionary to store all models and histories
-        all_models = {}
-        all_histories = {}
-        all_val_losses = {}
-        
-        # Train and evaluate models with each configuration
-        best_val_loss = float('inf')
-        best_config = None
-        best_config_idx = -1
-        
-        for i, config in enumerate(configs):
-            config_name = f"{feature_set_name}_config_{i+1}"
-            print(f"\nTrying configuration {i+1}/{len(configs)}:")
-            for key, value in config.items():
-                print(f"  {key}: {value}")
-            
-            # Train model with this configuration
-            model, history = self.train_model(prepared_data, config_name, config)
-            
-            # Save this model and history
-            all_models[config_name] = model
-            all_histories[config_name] = history
-            
-            # Get validation loss
-            val_loss = min(history.history['val_loss'])
-            all_val_losses[config_name] = val_loss
-            print(f"Validation loss: {val_loss:.6f}")
-            
-            # Check if this is the best model so far
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_config = config
-                best_config_idx = i
-                print(f"New best model found!")
-                
-                # Also save as the main model for this feature set
-                self.models[feature_set_name] = model
-                self.histories[feature_set_name] = history
-        
-        # Save all models and histories in a structured way
-        self.models[f"{feature_set_name}_all"] = all_models
-        self.histories[f"{feature_set_name}_all"] = all_histories
-        
-        # Save tuning results to CSV
-        self._save_tuning_results(feature_set_name, configs, all_val_losses, best_config_idx)
-        
-        print(f"\nBest configuration for {feature_set_name} (config_{best_config_idx+1}):")
-        for key, value in best_config.items():
-            print(f"  {key}: {value}")
-        print(f"Best validation loss: {best_val_loss:.6f}")
-        
-        return best_config
-    
-    def _save_tuning_results(self, feature_set_name, configs, val_losses, best_idx):
-        """
-        Save hyperparameter tuning results to CSV.
-        
-        Args:
-            feature_set_name: Name of the feature set
-            configs: List of configuration dictionaries
-            val_losses: Dictionary of validation losses
-            best_idx: Index of the best configuration
-        """
-        # Create directory for tuning results
-        os.makedirs('results/tuning', exist_ok=True)
-        
-        # Prepare data for CSV
-        results = []
-        for i, config in enumerate(configs):
-            config_name = f"{feature_set_name}_config_{i+1}"
-            row = {
-                'config_id': i+1,
-                'feature_set': feature_set_name,
-                'val_loss': val_losses.get(config_name, float('nan')),
-                'is_best': 'Yes' if i == best_idx else 'No'
-            }
-            # Add config parameters
-            for key, value in config.items():
-                if isinstance(value, list):
-                    row[key] = str(value)
-                else:
-                    row[key] = value
-            results.append(row)
-        
-        # Create DataFrame and save to CSV
-        results_df = pd.DataFrame(results)
-        results_df.to_csv(f'results/tuning/{feature_set_name}_tuning_results.csv', index=False)
-        print(f"Tuning results saved to results/tuning/{feature_set_name}_tuning_results.csv")
-        
-        # Also plot validation losses
-        self._plot_tuning_results(feature_set_name, results_df)
-    
-    def _plot_tuning_results(self, feature_set_name, results_df):
-        """
-        Plot hyperparameter tuning results.
-        
-        Args:
-            feature_set_name: Name of the feature set
-            results_df: DataFrame with tuning results
-        """
-        plt.figure(figsize=(10, 6))
-        bars = plt.bar(results_df['config_id'], results_df['val_loss'], alpha=0.7)
-        
-        # Highlight the best configuration
-        best_idx = results_df[results_df['is_best'] == 'Yes'].index[0]
-        bars[best_idx].set_color('green')
-        
-        plt.title(f'Hyperparameter Tuning Results - {feature_set_name}')
-        plt.xlabel('Configuration ID')
-        plt.ylabel('Validation Loss')
-        plt.xticks(results_df['config_id'])
-        plt.grid(axis='y', linestyle='--', alpha=0.7)
-        
-        # Add value labels on top of bars
-        for bar in bars:
-            height = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width()/2., height,
-                    f'{height:.6f}',
-                    ha='center', va='bottom', rotation=0)
-        
-        plt.tight_layout()
-        plt.savefig(f'results/tuning/{feature_set_name}_tuning_comparison.png')
-        plt.close()
-    
-    def generate_markdown_documentation(self):
-        """
-        Generate markdown documentation for the LSTM hyperparameter tuning approach.
-        
-        Returns:
-            Markdown string with documentation
-        """
-        markdown = """# LSTM Hyperparameter Tuning for PV Power Forecasting
-
-## Overview
-
-This document describes the enhanced LSTM (Long Short-Term Memory) model approach for photovoltaic (PV) power forecasting, with a focus on systematic hyperparameter tuning to improve model accuracy.
-
-## Table of Contents
-
-1. [Problem Statement](#problem-statement)
-2. [Enhanced LSTM Architecture](#enhanced-lstm-architecture)
-3. [Hyperparameter Tuning Approach](#hyperparameter-tuning-approach)
-4. [Visualization and Analysis](#visualization-and-analysis)
-5. [How to Use the Model](#how-to-use-the-model)
-6. [Results and Interpretation](#results-and-interpretation)
-
-## Problem Statement
-
-Accurate forecasting of PV power output is crucial for grid integration and energy management. The challenge is to create a model that can effectively capture the temporal patterns in weather and solar radiation data to predict power output. Our previous LSTM model showed promising results, but there was room for improvement through hyperparameter optimization.
-
-## Enhanced LSTM Architecture
-
-The enhanced LSTM model incorporates several advanced features:
-
-### 1. Bidirectional LSTM Layers
-
-Bidirectional LSTMs process sequences in both forward and backward directions, allowing the model to capture patterns from both past and future time steps. This is particularly useful for time series data where future context can help improve predictions.
-
-```python
-if cfg['bidirectional']:
-    model.add(Bidirectional(
-        LSTM(cfg['lstm_units'][0],
-             return_sequences=len(cfg['lstm_units']) > 1,
-             kernel_regularizer=regularizer,
-             recurrent_regularizer=regularizer),
-        input_shape=input_shape
-    ))
-```
-
-### 2. Batch Normalization
-
-Batch normalization stabilizes and accelerates training by normalizing layer inputs, reducing internal covariate shift. This helps the model train faster and more reliably, especially with deeper architectures.
-
-```python
-if cfg['batch_norm']:
-    model.add(BatchNormalization())
-```
-
-### 3. Regularization Techniques
-
-Multiple regularization techniques are employed to prevent overfitting:
-
-- **Dropout**: Randomly sets input units to 0 during training, forcing the network to learn redundant representations
-- **L1/L2 Regularization**: Penalizes large weights to encourage simpler models that generalize better
-
-```python
-# Create regularizer if specified
-regularizer = None
-if cfg['l1_reg'] > 0 or cfg['l2_reg'] > 0:
-    regularizer = l1_l2(l1=cfg['l1_reg'], l2=cfg['l2_reg'])
-```
-
-### 4. Learning Rate Scheduling
-
-Adaptive learning rate scheduling with ReduceLROnPlateau adjusts the learning rate when training plateaus, helping the model converge to better minima.
-
-```python
-ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=0.00001, verbose=1)
-```
-
-## Hyperparameter Tuning Approach
-
-Our hyperparameter tuning approach is systematic and comprehensive:
-
-### Configurable Parameters
-
-The following hyperparameters can be tuned:
-
-| Parameter | Description |
-|-----------|-------------|
-| LSTM Units | Number of units in each LSTM layer |
-| Dense Units | Number of units in each dense layer |
-| Dropout Rates | Dropout probability after each layer |
-| Learning Rate | Initial learning rate for the optimizer |
-| Bidirectional | Whether to use bidirectional LSTM layers |
-| Batch Normalization | Whether to use batch normalization |
-| L1/L2 Regularization | Strength of L1 and L2 regularization |
-
-### Predefined Configurations
-
-We've defined 5 different configurations to explore different aspects of the model:
-
-1. **Baseline Enhanced Model**: A balanced model with moderate complexity and regularization
-2. **Deeper Model**: A deeper architecture with 3 LSTM layers
-3. **Higher Capacity Model**: A model with more units in each layer
-4. **More Regularization**: A model with stronger regularization to combat overfitting
-5. **Simpler Model**: A lighter model with less regularization
-
-Additionally, we've added feature-specific configurations for each data source (inca, station, combined) based on their characteristics.
-
-### Tuning Process
-
-The tuning process involves:
-
-1. Training models with each configuration
-2. Evaluating performance on validation data
-3. Selecting the best configuration based on validation loss
-4. Training a final model with the best configuration
-
-## Visualization and Analysis
-
-Our approach includes comprehensive visualization and analysis tools:
-
-### Training History Visualization
-
-For each configuration, we generate:
-
-- Loss curves showing training and validation loss over epochs
-- MAE curves showing training and validation MAE over epochs
-
-### Configuration Comparison
-
-We provide tools to compare different configurations:
-
-- Bar charts comparing validation loss across configurations
-- Line charts comparing validation metrics over epochs
-- CSV reports with detailed performance metrics
-
-### Results Analysis
-
-The final results include:
-
-- Prediction vs. actual plots for test data
-- Scatter plots showing correlation between predicted and actual values
-- Comprehensive metrics including MSE, RMSE, MAE, and R²
-
-## How to Use the Model
-
-The model can be run with or without hyperparameter tuning:
-
-```python
-# With hyperparameter tuning
-forecaster = LSTMForecaster(
-    sequence_length=24,
-    batch_size=64,
-    epochs=150,
-    model_config=model_config
-)
-metrics = forecaster.run_pipeline(
-    'data/processed_training_data.parquet',
-    perform_tuning=True
-)
-
-# Without hyperparameter tuning (using predefined configuration)
-metrics = forecaster.run_pipeline(
-    'data/processed_training_data.parquet',
-    perform_tuning=False
-)
-```
-
-### Key Parameters
-
-- `sequence_length`: Number of time steps to look back (default: 24)
-- `batch_size`: Batch size for training (default: 64)
-- `epochs`: Maximum number of epochs for training (default: 150)
-- `model_config`: Dictionary with model hyperparameters
-- `perform_tuning`: Whether to perform hyperparameter tuning
-
-## Results and Interpretation
-
-Based on our previous runs, the station feature set performed best with an RMSE of 611.11 and R² of 0.9228. The enhanced model with hyperparameter tuning is expected to further improve these metrics.
-
-The tuning results are saved in the `results/tuning` directory, with detailed CSV reports and comparison plots for each feature set. The final model comparison is saved in `results/model_comparison.csv`.
-
-### Key Findings
-
-- Bidirectional LSTM layers significantly improve model performance
-- Batch normalization helps stabilize training, especially for deeper models
-- Moderate dropout (0.25-0.35) provides the best balance for regularization
-- Feature-specific optimizations yield better results than a one-size-fits-all approach
-"""
-        
-        # Save the markdown to a file
-        os.makedirs('docs', exist_ok=True)
-        with open('docs/lstm_hyperparameter_tuning_guide.md', 'w') as f:
-            f.write(markdown)
-        
-        print("Documentation generated and saved to docs/lstm_hyperparameter_tuning_guide.md")
-        
-        return markdown
-    
-    def run_pipeline(self, data_filepath, target_col='power_w', perform_tuning=True, generate_docs=True):
-        """
-        Run the complete LSTM forecasting pipeline.
-        
-        Args:
-            data_filepath: Path to the parquet file with data
-            target_col: Target column name
-            perform_tuning: Whether to perform hyperparameter tuning
-            generate_docs: Whether to generate markdown documentation
-        """
-        # Generate documentation if requested
-        if generate_docs:
-            self.generate_markdown_documentation()
-        
-        # Load data
-        df = self.load_data(data_filepath)
-        
-        # Prepare feature sets
-        feature_sets = self.prepare_feature_sets(df)
-        
-        # Split data
-        data_splits = self.split_data(df)
-        
-        # Train and evaluate models for each feature set
-        metrics_dict = {}
-        
-        for set_name, features in feature_sets.items():
-            print(f"\n{'='*50}")
-            print(f"Processing {set_name} feature set")
-            print(f"Features: {features}")
-            print(f"{'='*50}")
-            
-            # Prepare data for LSTM
-            prepared_data = self.prepare_data_for_lstm(data_splits, features, target_col)
-            
-            if perform_tuning:
-                # Perform hyperparameter tuning
-                best_config = self.tune_hyperparameters(prepared_data, set_name)
-                
-                # Plot training histories for all configurations
-                self.plot_all_training_histories(set_name)
-                
-                # Train final model with best configuration
-                model, history = self.train_model(prepared_data, set_name, best_config)
-            else:
-                # Train model with default configuration
-                model, history = self.train_model(prepared_data, set_name)
-            
-            # Plot training history for the final model
-            self.plot_training_history(set_name)
-            
-            # Evaluate model
-            metrics = self.evaluate_model(model, prepared_data, set_name)
-            metrics_dict[set_name] = metrics
-        
-        # Save comparison results
-        self.save_results(metrics_dict)
-        
-        return metrics_dict
-
-
-if __name__ == "__main__":
-    # Set parameters
-    SEQUENCE_LENGTH = 24  # Look back 24 time steps (6 hours with 15-min data)
-    BATCH_SIZE = 64
-    EPOCHS = 150  # Increased max epochs with early stopping
-    
-    # Whether to perform hyperparameter tuning (can be time-consuming)
-    # Set to False to use the predefined optimized configuration
-    PERFORM_TUNING = True
-    
-    # Whether to generate markdown documentation
-    GENERATE_DOCS = True
-    
-    # Define optimized model configuration (used if PERFORM_TUNING is False)
-    model_config = {
-        'lstm_units': [128, 64],  # Increased units in LSTM layers
-        'dense_units': [32, 16],  # Added more dense units
-        'dropout_rates': [0.3, 0.3],  # Adjusted dropout for better regularization
-        'learning_rate': 0.001,
-        'bidirectional': True,  # Use bidirectional LSTM for better sequence learning
-        'batch_norm': True,  # Add batch normalization to stabilize training
-        'l1_reg': 0.0,  # No L1 regularization
-        'l2_reg': 0.001,  # L2 regularization to prevent overfitting
-        'optimizer': 'adam'  # Using Adam optimizer
-    }
-    
-    print("=" * 80)
-    print("LSTM Model with Hyperparameter Tuning")
-    print("=" * 80)
-    print(f"Sequence Length: {SEQUENCE_LENGTH}")
-    print(f"Batch Size: {BATCH_SIZE}")
-    print(f"Max Epochs: {EPOCHS}")
-    print(f"Hyperparameter Tuning: {'Enabled' if PERFORM_TUNING else 'Disabled'}")
-    print(f"Generate Documentation: {'Enabled' if GENERATE_DOCS else 'Disabled'}")
-    print("=" * 80)
-    
-    # Initialize forecaster with enhanced configuration
-    forecaster = LSTMForecaster(
-        sequence_length=SEQUENCE_LENGTH,
-        batch_size=BATCH_SIZE,
-        epochs=EPOCHS,
-        model_config=model_config
-    )
-    
-    # Generate documentation if requested
-    if GENERATE_DOCS:
-        forecaster.generate_markdown_documentation()
-        print("Documentation generated successfully!")
-    
-    # Run pipeline with or without hyperparameter tuning
-    metrics = forecaster.run_pipeline(
-        'data/processed_training_data.parquet',
-        perform_tuning=PERFORM_TUNING,
-        generate_docs=False  # Already generated above if requested
-    )
-    
-    # Print final comparison
-    print("\nModel Comparison:")
-    for set_name, metrics in metrics.items():
-        print(f"{set_name} model - RMSE: {metrics['rmse']:.2f}, R²: {metrics['r2']:.4f}")
+        plt.savefig(f'results/{self.config["feature_set"]}_config_{self.config["config_id"]}_scatter.png')
