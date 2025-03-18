@@ -5,7 +5,6 @@ This document provides instructions for running the PV Forecasting application u
 ## Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/)
-- [Docker Compose](https://docs.docker.com/compose/install/) (usually included with Docker Desktop)
 - For GPU support: [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
 
 ## Quick Start
@@ -13,7 +12,7 @@ This document provides instructions for running the PV Forecasting application u
 1. Build and start the container:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 This will:
@@ -25,7 +24,7 @@ This will:
 2. View logs:
 
 ```bash
-docker-compose logs -f
+docker compose logs -f
 ```
 
 ## Running Different Scripts
@@ -33,13 +32,13 @@ docker-compose logs -f
 ### To run the model training script:
 
 ```bash
-docker-compose run --rm pvforecast python src/run_lstm_models.py
+docker compose run --rm pvforecast python src/run_lstm_models.py
 ```
 
 ### To run any other script:
 
 ```bash
-docker-compose run --rm pvforecast python src/your_script.py
+docker compose run --rm pvforecast python src/your_script.py
 ```
 
 ## Building Without Docker Compose
@@ -60,7 +59,7 @@ docker run --gpus all -v ./data:/app/data -v ./models:/app/models -v ./results:/
 
 ## GPU Support
 
-The Dockerfile and docker-compose.yml are configured to use GPU if available. Make sure you have:
+The Dockerfile and compose.yaml are configured to use GPU if available. Make sure you have:
 
 1. NVIDIA GPU drivers installed on your host machine
 2. NVIDIA Container Toolkit installed
@@ -70,7 +69,7 @@ The Dockerfile and docker-compose.yml are configured to use GPU if available. Ma
 
 ### Environment Variables
 
-You can add environment variables in the `docker-compose.yml` file:
+You can add environment variables in the `compose.yaml` file:
 
 ```yaml
 environment:

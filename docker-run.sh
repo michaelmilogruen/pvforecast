@@ -71,32 +71,32 @@ fi
 # Stop and remove containers if requested
 if [ "$STOP_CONTAINERS" = true ]; then
     echo "Stopping and removing containers..."
-    docker-compose down
+    docker compose down
     exit 0
 fi
 
 # Build the Docker image if requested
 if [ "$BUILD" = true ]; then
     echo "Building Docker image..."
-    docker-compose build
+    docker compose build
 fi
 
 # Run the forecast script
 if [ "$RUN_FORECAST" = true ]; then
     echo "Running forecast script..."
-    docker-compose up
+    docker compose up
 fi
 
 # Run the model training script
 if [ "$RUN_TRAINING" = true ]; then
     echo "Running model training script..."
-    docker-compose run --rm pvforecast python src/run_lstm_models.py
+    docker compose run --rm pvforecast python src/run_lstm_models.py
 fi
 
 # Start a shell in the container
 if [ "$RUN_SHELL" = true ]; then
     echo "Starting shell in container..."
-    docker-compose run --rm pvforecast /bin/bash
+    docker compose run --rm pvforecast /bin/bash
 fi
 
 exit 0
