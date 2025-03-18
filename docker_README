@@ -1,0 +1,92 @@
+# PV Forecast
+
+A photovoltaic power forecasting application using LSTM models to predict power output based on weather data.
+
+## Project Structure
+
+- `src/`: Source code for the application
+  - `forecast.py`: Main script for forecasting PV power output
+  - `run_lstm_models.py`: Script for training LSTM models
+  - `lstm_model.py`: LSTM model implementation
+  - `lstma.py`: Helper functions for LSTM models
+- `data/`: Input and output data
+- `models/`: Trained models and scalers
+- `results/`: Visualization outputs
+- `docs/`: Documentation
+
+## Setup Options
+
+### Option 1: Docker (Standard Environment)
+
+For standard environments with Docker and Docker Compose installed:
+
+1. Build and run the container:
+   ```bash
+   docker compose up -d
+   ```
+
+2. Run model training:
+   ```bash
+   docker compose run --rm pvforecast python src/run_lstm_models.py
+   ```
+
+See `docker-README.md` for detailed Docker instructions.
+
+### Option 2: Direct Installation (Cloud Notebooks/Deepnote)
+
+For cloud notebook environments like Deepnote where Docker daemon might not be available:
+
+1. Run the setup script:
+   ```bash
+   bash deepnote_setup.sh
+   ```
+
+2. Run the application:
+   ```bash
+   python src/forecast.py  # For forecasting
+   python src/run_lstm_models.py  # For model training
+   ```
+
+## Requirements
+
+- Python 3.8+
+- TensorFlow 2.13.0+
+- See `requirements.txt` for full dependencies
+
+## Docker Configuration
+
+The Docker setup includes:
+- TensorFlow with GPU support
+- All required Python dependencies
+- Volume mounts for data persistence
+- GPU acceleration (if available)
+
+## Running Without Docker
+
+If you prefer to run without Docker:
+
+1. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. Run the application:
+   ```bash
+   python src/forecast.py
+   ```
+
+## Troubleshooting
+
+### Docker Issues in Cloud Environments
+
+In cloud notebook environments like Deepnote:
+- Docker might be installed but the daemon might not be running with systemd
+- Use the `deepnote_setup.sh` script to set up the environment directly
+- Run Python scripts directly instead of using Docker
+
+### GPU Support
+
+For GPU acceleration:
+- Ensure NVIDIA drivers are installed
+- Install NVIDIA Container Toolkit (for Docker)
+- Use TensorFlow with GPU support
