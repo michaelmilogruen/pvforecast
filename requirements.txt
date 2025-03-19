@@ -4,6 +4,7 @@ pandas>=2.0.0
 scipy>=1.10.0
 
 # Machine Learning
+scikit-learn>=1.3.0
 tensorflow>=2.13.0
 joblib>=1.3.0
 
@@ -22,3 +23,5 @@ pvlib>=0.10.0
 
 # Save and load compressed data
 python-snappy>=0.6.1  # Required for parquet compression
+
+tensorflow[and-cuda]>=2.13.0  # For GPU acceleration
