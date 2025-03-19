@@ -17,10 +17,7 @@ import csv
 from tensorflow.keras.models import load_model
 from lstma import predict_power
 
-# Load the saved model and scalers
-model = load_model('models/final_model.h5', compile=False)
-sc_x = joblib.load('models/scaler_x.pkl')
-sc_y = joblib.load('models/scaler_y.pkl')
+# Global variables and constants
 
 def fetch_weather_data():
     """
@@ -88,15 +85,43 @@ def process_weather_data(data):
         'wind_gust_north': parameters['vgust']['data']
     })
 
-    # Extract hour and month features
-    new_data['hour'] = new_data['timestamp'].dt.hour
-    new_data['sin_hour'] = np.sin(2 * np.pi * new_data['hour'] / 24.0)
-    new_data['cos_hour'] = np.cos(2 * np.pi * new_data['hour'] / 24.0)
-    new_data['month'] = new_data['timestamp'].dt.month
-    new_data['sin_month'] = np.sin(2 * np.pi * new_data['month'] / 12.0)
-    new_data['cos_month'] = np.cos(2 * np.pi * new_data['month'] / 12.0)
+    # Set timestamp as index
+    new_data.set_index('timestamp', inplace=True)
+    
+    # Add derived features using the same approach as in training
+    new_data = add_derived_features(new_data)
+    
+    # Reset index to keep timestamp as a column
+    new_data.reset_index(inplace=True)
 
     return new_data
+
+def add_derived_features(df):
+    """
+    Add derived time-based features consistent with the training process.
+    
+    Args:
+        df: DataFrame with datetime index
+        
+    Returns:
+        DataFrame with added time-based features
+    """
+    # Calculate hour with minute resolution (e.g., 15:15 becomes 15.25)
+    df['hour'] = df.index.hour + df.index.minute / 60
+    df['day_of_year'] = df.index.dayofyear
+    
+    # Add circular encoding for hour and day of year
+    angle_hour = 2 * np.pi * df['hour'] / 24
+    df['hour_sin'] = np.sin(angle_hour)
+    df['hour_cos'] = np.cos(angle_hour)
+    
+    df['day_sin'] = np.sin(2 * np.pi * df.index.dayofyear / 365)
+    df['day_cos'] = np.cos(2 * np.pi * df.index.dayofyear / 365)
+    
+    # Add isNight feature (simplified approach - consider night if hour is outside 6-18)
+    df['isNight'] = ((df['hour'] < 6) | (df['hour'] > 18)).astype(int)
+    
+    return df
 
 def export_to_csv(data, filename='data/forecast_data.csv'):
     # Assuming 'data' is a list of dictionaries
@@ -120,19 +145,43 @@ def main():
     Main function to fetch weather data, process it, and predict power output for the next day.
     """
     # Load model and scalers
-    model = load_model('models/best_model.keras')
-    feature_scaler = joblib.load('models/feature_scaler.save')
-    target_scaler = joblib.load('models/target_scaler.save')
+    model = load_model('models/power_forecast_model.keras')
+    feature_scaler = joblib.load('models/scaler_x.pkl')
+    target_scaler = joblib.load('models/scaler_y.pkl')
 
     weather_data = fetch_weather_data()
     if weather_data is not None:
         new_data = process_weather_data(weather_data)
-
-        # Update features list to use poa_global instead of global_irradiation
-        features = ['temp_air', 'wind_speed', 'poa_global']
+        
+        # Create a new DataFrame with the same feature names as used during training
+        # Map the inference feature names to the training feature names
+        training_data = pd.DataFrame({
+            'Station_GlobalRadiation [W m-2]': new_data['poa_global'],
+            'Station_Temperature [degree_Celsius]': new_data['temp_air'],
+            'Station_WindSpeed [m s-1]': new_data['wind_speed'],
+            'Station_ClearSkyIndex': 1.0,  # Default value, adjust if needed
+            'hour_sin': new_data['hour_sin'],
+            'hour_cos': new_data['hour_cos'],
+            'day_sin': new_data['day_sin'],
+            'day_cos': new_data['day_cos'],
+            'isNight': new_data['isNight']
+        })
+        
+        # Define the features in the same order as used during training
+        training_features = [
+            'Station_GlobalRadiation [W m-2]',
+            'Station_Temperature [degree_Celsius]',
+            'Station_WindSpeed [m s-1]',
+            'Station_ClearSkyIndex',
+            'hour_sin',
+            'hour_cos',
+            'day_sin',
+            'day_cos',
+            'isNight'
+        ]
 
         # Use the predict_power function with all required arguments
-        predicted_powers = predict_power(model, feature_scaler, target_scaler, new_data[features])
+        predicted_powers = predict_power(model, feature_scaler, target_scaler, training_data[training_features])
 
         # Print the results to the console
         print("Predicted AC Power for the next 24 hours (in W):")
