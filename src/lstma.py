@@ -18,7 +18,7 @@ def load_training_data(file_path):
     
     # Extract relevant features and target
     features = df[['temp_air', 'wind_speed', 'poa_global']]  # Using correct column names from your data
-    target = df['AC Power']  # Using correct column name for power output
+    target = df['power_w']  # Using correct column name for power output (matching process_training_data.py)
     
     return features, target
 
@@ -168,9 +168,17 @@ def main():
 # Function to make predictions with new data
 def predict_power(model, feature_scaler, target_scaler, new_data, seq_length=24):
     """
-    new_data should be a DataFrame with columns: temperature, wind_speed, global_irradiation
+    new_data can be either:
+    1. A DataFrame with raw features that need to be scaled
+    2. An already scaled numpy array (when pre-scaled features are provided)
     """
-    scaled_features = feature_scaler.transform(new_data)
+    # Check if new_data is already a numpy array (pre-scaled)
+    if isinstance(new_data, np.ndarray):
+        scaled_features = new_data
+    else:
+        # Otherwise, scale the features
+        scaled_features = feature_scaler.transform(new_data)
+    
     sequences = []
     for i in range(len(scaled_features) - seq_length + 1):
         sequences.append(scaled_features[i:(i + seq_length)])

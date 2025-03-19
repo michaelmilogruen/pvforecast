@@ -34,6 +34,34 @@ df.head()
 # Feature selection
 # Define function to prepare feature sets
 
+def predict_power(model, feature_scaler, target_scaler, new_data, seq_length=24):
+    """
+    Args:
+        model: Trained LSTM model.
+        feature_scaler: Fitted MinMaxScaler for the features.
+        target_scaler: Fitted MinMaxScaler for the target.
+        new_data: new input, can be either:
+            1. A DataFrame with raw features that need to be scaled
+            2. An already scaled numpy array (when pre-scaled features are provided)
+        seq_length (int): Length of the input sequence for the LSTM model. Defaults to 24.
+
+    Returns:
+        numpy.ndarray: Inverse transformed predictions
+    """
+    # Check if new_data is already a numpy array (pre-scaled)
+    if isinstance(new_data, np.ndarray):
+        scaled_features = new_data
+    else:
+        # Otherwise, scale the features
+        scaled_features = feature_scaler.transform(new_data)
+    
+    sequences = []
+    for i in range(len(scaled_features) - seq_length + 1):
+        sequences.append(scaled_features[i:(i + seq_length)])
+    
+    predictions = model.predict(np.array(sequences))
+    return target_scaler.inverse_transform(predictions)
+
 def prepare_feature_sets(df):
     """
     Prepare the three feature sets from the dataframe.

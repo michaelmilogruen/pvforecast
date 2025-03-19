@@ -15,7 +15,7 @@ import json
 from datetime import datetime
 import csv
 from tensorflow.keras.models import load_model
-from lstma import predict_power
+
 
 # Global variables and constants
 
@@ -42,6 +42,34 @@ def fetch_weather_data():
     else:
         print(f"Failed to fetch data. Status code: {response.status_code}")
         return None
+    
+def predict_power(model, feature_scaler, target_scaler, new_data, seq_length=24):
+    """
+    Args:
+        model: Trained LSTM model.
+        feature_scaler: Fitted MinMaxScaler for the features.
+        target_scaler: Fitted MinMaxScaler for the target.
+        new_data: new input, can be either:
+            1. A DataFrame with raw features that need to be scaled
+            2. An already scaled numpy array (when pre-scaled features are provided)
+        seq_length (int): Length of the input sequence for the LSTM model. Defaults to 24.
+
+    Returns:
+        numpy.ndarray: Inverse transformed predictions
+    """
+    # Check if new_data is already a numpy array (pre-scaled)
+    if isinstance(new_data, np.ndarray):
+        scaled_features = new_data
+    else:
+        # Otherwise, scale the features
+        scaled_features = feature_scaler.transform(new_data)
+    
+    sequences = []
+    for i in range(len(scaled_features) - seq_length + 1):
+        sequences.append(scaled_features[i:(i + seq_length)])
+    
+    predictions = model.predict(np.array(sequences))
+    return target_scaler.inverse_transform(predictions)
 
 def process_weather_data(data):
     """
@@ -159,7 +187,7 @@ def main():
             'Station_GlobalRadiation [W m-2]': new_data['poa_global'],
             'Station_Temperature [degree_Celsius]': new_data['temp_air'],
             'Station_WindSpeed [m s-1]': new_data['wind_speed'],
-            'Station_ClearSkyIndex': 1.0,  # Default value, adjust if needed
+            'Station_ClearSkyIndex': new_data['total_cloud_cover'],  # Using total cloud cover instead of default value
             'hour_sin': new_data['hour_sin'],
             'hour_cos': new_data['hour_cos'],
             'day_sin': new_data['day_sin'],
@@ -180,8 +208,21 @@ def main():
             'isNight'
         ]
 
-        # Use the predict_power function with all required arguments
-        predicted_powers = predict_power(model, feature_scaler, target_scaler, training_data[training_features])
+        # Separate features that need scaling from those that don't (same approach as in training)
+        time_features = ['hour_sin', 'hour_cos', 'day_sin', 'day_cos', 'isNight']
+        features_to_scale = [f for f in training_features if f not in time_features]
+        
+        # Scale only the features that need scaling
+        scaled_features = feature_scaler.transform(training_data[features_to_scale])
+        
+        # Get the additional features that don't need scaling
+        unscaled_features = training_data[time_features].values
+        
+        # Combine scaled and unscaled features
+        X_combined = np.hstack((scaled_features, unscaled_features))
+        
+        # Use the predict_power function with the properly prepared features
+        predicted_powers = predict_power(model, feature_scaler, target_scaler, X_combined)
 
         # Print the results to the console
         print("Predicted AC Power for the next 24 hours (in W):")
@@ -198,9 +239,6 @@ def main():
             wind_speed = new_data['wind_speed'].iloc[i]
             global_irradiation = new_data['poa_global'].iloc[i]
             
-            # Set power to zero if global irradiation is zero
-            if global_irradiation == 0:
-                power[0] = 0
             
             print("|  {:<18} |  {:<15.2f} |  {:<15.2f} |  {:<15.2f} |  {:<25.2f} |  {:<15.2f} |  {:<15.2f} |  {:<15.2f} |  {:<15.2f} |  {:<15.2f} |  {:<15.2f} |  {:<15.2f} |  {:<15.2f} |  {:<15.2f} |  {:<15.2f} |  {:<15.2f} |  {:<15.2f} |  {:<15.2f} |  {:<15.2f} |  {:<15.2f} |  {:<15.2f} |".format(
                 future_time, power[0], temp_air, wind_speed, global_irradiation,
@@ -215,7 +253,7 @@ def main():
             future_time = (datetime.now() + pd.Timedelta(hours=i)).strftime("%Y-%m-%d %H:%M")
             export_data.append({
                 'timestamp': future_time,
-                'power_w': power[0] if new_data['poa_global'].iloc[i] != 0 else 0,
+                'power_w': max(0, power[0]),  # Ensure power is non-negative
                 'temperature_c': new_data['temp_air'].iloc[i],
                 'wind_speed_ms': new_data['wind_speed'].iloc[i],
                 'global_irradiation': new_data['poa_global'].iloc[i],
