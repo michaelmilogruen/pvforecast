@@ -32,25 +32,80 @@ df.head()
 
 # %%
 # Feature selection
-# Select relevant features for the model
+# Define function to prepare feature sets
 
-# Original features that will be scaled
-features_to_scale = [
-    'INCA_GlobalRadiation [W m-2]',  # Global Horizontal Irradiance
-    'INCA_ClearSkyDHI',              # Diffuse Horizontal Irradiance
-    'INCA_ClearSkyDNI',              # Direct Normal Irradiance
-    'INCA_Temperature [degree_Celsius]',  # Temperature
-    'INCA_WindSpeed [m s-1]',        # Wind Speed
-    'INCA_ClearSkyIndex'             # Cloud Cover proxy
-]
+def prepare_feature_sets(df):
+    """
+    Prepare the three feature sets from the dataframe.
+    
+    Args:
+        df: DataFrame with all features
+        
+    Returns:
+        Dictionary with three feature sets
+    """
+    # Define the feature sets
+    feature_sets = {
+        'inca': [
+            'INCA_GlobalRadiation [W m-2]',
+            'INCA_Temperature [degree_Celsius]',
+            'INCA_WindSpeed [m s-1]',
+            'INCA_ClearSkyIndex',
+            'hour_sin',  # Using hour_sin/cos as circular time features
+            'hour_cos',
+            'day_cos',   # Added day_cos as requested
+            'day_sin',   # Added day_sin as requested
+            'isNight'    # Added isNight as requested
+        ],
+        'station': [
+            'Station_GlobalRadiation [W m-2]',
+            'Station_Temperature [degree_Celsius]',
+            'Station_WindSpeed [m s-1]',
+            'Station_ClearSkyIndex',
+            'hour_sin',
+            'hour_cos',
+            'day_cos',   # Added day_cos as requested
+            'day_sin',   # Added day_sin as requested
+            'isNight'    # Added isNight as requested
+        ],
+        'combined': [
+            'Combined_GlobalRadiation [W m-2]',
+            'Combined_Temperature [degree_Celsius]',
+            'Combined_WindSpeed [m s-1]',
+            'Combined_ClearSkyIndex',
+            'hour_sin',
+            'hour_cos',
+            'day_cos',   # Added day_cos as requested
+            'day_sin',   # Added day_sin as requested
+            'isNight'    # Added isNight as requested
+        ]
+    }
+    
+    # Verify all features exist in the dataframe
+    for set_name, features in feature_sets.items():
+        missing_features = [f for f in features if f not in df.columns]
+        if missing_features:
+            print(f"Warning: Missing features in {set_name} set: {missing_features}")
+            # Remove missing features from the set
+            feature_sets[set_name] = [f for f in features if f in df.columns]
+    
+    return feature_sets
 
-# Additional features that don't need scaling (already normalized or binary)
-# day_sin and day_cos are circular encodings with values between -1 and 1
-# isNight is a binary feature (0 for day, 1 for night)
-additional_features = ['day_sin', 'day_cos', 'isNight']
+# Get feature sets
+feature_sets = prepare_feature_sets(df)
 
-# All features combined
-features = features_to_scale + additional_features
+# Select the feature set to use (default to 'station')
+feature_set_name = 'station'
+features = feature_sets[feature_set_name]
+
+# Separate features that need scaling from those that don't
+time_features = ['hour_sin', 'hour_cos', 'day_sin', 'day_cos', 'isNight']
+features_to_scale = [f for f in features if f not in time_features]
+additional_features = [f for f in features if f in time_features]
+
+print(f"Using feature set: {feature_set_name}")
+print(f"Features to scale: {features_to_scale}")
+print(f"Additional features: {additional_features}")
 
 target = 'power_w'  # Target variable (power output in watts)
 
@@ -510,7 +565,7 @@ print("Model also saved as the default model for backward compatibility.")
 # %%
 # Class implementation for use with run_lstm_models.py
 class LSTMForecaster:
-    def __init__(self, sequence_length=24, batch_size=32, epochs=50):
+    def __init__(self, sequence_length=24, batch_size=32, epochs=50, feature_set='station'):
         self.sequence_length = sequence_length
         self.batch_size = batch_size
         self.epochs = epochs
@@ -518,7 +573,7 @@ class LSTMForecaster:
         # Configuration for station_config_2
         self.config = {
             'config_id': 2,
-            'feature_set': 'station',
+            'feature_set': feature_set,  # Use the provided feature_set parameter
             'lstm_units': [128, 64, 32],
             'dense_units': [32, 16],
             'dropout_rates': [0.3, 0.3, 0.3],
@@ -530,6 +585,63 @@ class LSTMForecaster:
             'optimizer': 'adam'
         }
     
+    def prepare_feature_sets(self, df):
+        """
+        Prepare the three feature sets from the dataframe.
+        
+        Args:
+            df: DataFrame with all features
+            
+        Returns:
+            Dictionary with three feature sets
+        """
+        # Define the feature sets
+        feature_sets = {
+            'inca': [
+                'INCA_GlobalRadiation [W m-2]',
+                'INCA_Temperature [degree_Celsius]',
+                'INCA_WindSpeed [m s-1]',
+                'INCA_ClearSkyIndex',
+                'hour_sin',  # Using hour_sin/cos as circular time features
+                'hour_cos',
+                'day_cos',   # Added day_cos as requested
+                'day_sin',   # Added day_sin as requested
+                'isNight'    # Added isNight as requested
+            ],
+            'station': [
+                'Station_GlobalRadiation [W m-2]',
+                'Station_Temperature [degree_Celsius]',
+                'Station_WindSpeed [m s-1]',
+                'Station_ClearSkyIndex',
+                'hour_sin',
+                'hour_cos',
+                'day_cos',   # Added day_cos as requested
+                'day_sin',   # Added day_sin as requested
+                'isNight'    # Added isNight as requested
+            ],
+            'combined': [
+                'Combined_GlobalRadiation [W m-2]',
+                'Combined_Temperature [degree_Celsius]',
+                'Combined_WindSpeed [m s-1]',
+                'Combined_ClearSkyIndex',
+                'hour_sin',
+                'hour_cos',
+                'day_cos',   # Added day_cos as requested
+                'day_sin',   # Added day_sin as requested
+                'isNight'    # Added isNight as requested
+            ]
+        }
+        
+        # Verify all features exist in the dataframe
+        for set_name, features in feature_sets.items():
+            missing_features = [f for f in features if f not in df.columns]
+            if missing_features:
+                print(f"Warning: Missing features in {set_name} set: {missing_features}")
+                # Remove missing features from the set
+                feature_sets[set_name] = [f for f in features if f in df.columns]
+        
+        return feature_sets
+    
     def run_pipeline(self, data_path):
         """Run the full LSTM forecasting pipeline"""
         print(f"Running LSTM forecasting pipeline with {self.config['feature_set']} configuration {self.config['config_id']}")
@@ -538,17 +650,27 @@ class LSTMForecaster:
         df = pd.read_parquet(data_path)
         print(f"Loaded data shape: {df.shape}")
         
-        # Feature selection (same as in the notebook)
-        features_to_scale = [
-            'INCA_GlobalRadiation [W m-2]',
-            'INCA_ClearSkyDHI',
-            'INCA_ClearSkyDNI',
-            'INCA_Temperature [degree_Celsius]',
-            'INCA_WindSpeed [m s-1]',
-            'INCA_ClearSkyIndex'
-        ]
-        additional_features = ['day_sin', 'day_cos', 'isNight']
-        features = features_to_scale + additional_features
+        # Get feature sets
+        feature_sets = self.prepare_feature_sets(df)
+        
+        # Select the appropriate feature set based on configuration
+        feature_set_name = self.config['feature_set']
+        if feature_set_name not in feature_sets:
+            print(f"Warning: Feature set '{feature_set_name}' not found. Using 'station' as default.")
+            feature_set_name = 'station'
+        
+        # Get the features for the selected feature set
+        features = feature_sets[feature_set_name]
+        
+        # Separate features that need scaling from those that don't
+        time_features = ['hour_sin', 'hour_cos', 'day_sin', 'day_cos', 'isNight']
+        features_to_scale = [f for f in features if f not in time_features]
+        additional_features = [f for f in features if f in time_features]
+        
+        print(f"Using feature set: {feature_set_name}")
+        print(f"Features to scale: {features_to_scale}")
+        print(f"Additional features: {additional_features}")
+        
         target = 'power_w'
         
         # Data normalization
