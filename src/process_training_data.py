@@ -213,11 +213,11 @@ class DataProcessor:
         os.makedirs('models', exist_ok=True)
 
         # Initialize scalers
-        minmax_scaler = MinMaxScaler()
-        standard_scaler = StandardScaler()
+        self.minmax_scaler = MinMaxScaler()
+        self.standard_scaler = StandardScaler()
 
         # Group columns by normalization type
-        minmax_columns = [
+        self.minmax_columns = [
             # INCA Radiation features
             'INCA_GlobalRadiation [W m-2]',
             'INCA_ClearSkyGHI',
@@ -255,18 +255,18 @@ class DataProcessor:
         ]
 
         # Filter columns that actually exist in the dataframe
-        minmax_columns = [col for col in minmax_columns if col in df.columns]
+        self.minmax_columns = [col for col in self.minmax_columns if col in df.columns]
         standard_columns = [col for col in standard_columns if col in df.columns]
 
         # Apply MinMaxScaler to radiation and PV output features (0 to 1 range)
-        if minmax_columns:
-            df[minmax_columns] = minmax_scaler.fit_transform(df[minmax_columns])
-            joblib.dump(minmax_scaler, 'models/minmax_scaler.pkl')
+        if self.minmax_columns:
+            df[self.minmax_columns] = self.minmax_scaler.fit_transform(df[self.minmax_columns])
+            joblib.dump(self.minmax_scaler, 'models/minmax_scaler.pkl')
 
         # Apply StandardScaler to weather measurements (zero mean, unit variance)
         if standard_columns:
-            df[standard_columns] = standard_scaler.fit_transform(df[standard_columns])
-            joblib.dump(standard_scaler, 'models/standard_scaler.pkl')
+            df[standard_columns] = self.standard_scaler.fit_transform(df[standard_columns])
+            joblib.dump(self.standard_scaler, 'models/standard_scaler.pkl')
 
         # Hour and day of year are kept as is since they're already normalized cyclically
         return df
@@ -337,6 +337,26 @@ class DataProcessor:
         # Normalize the data
         print("\nNormalizing data...")
         merged = self.normalize_data(merged)
+        
+        # Create and save a separate scaler just for the target variable (power_w)
+        if 'power_w' in merged.columns:
+            print("Creating and saving target-specific scaler for power_w...")
+            target_scaler = MinMaxScaler()
+            # Get the original (unnormalized) power_w values
+            # We need to extract this before normalization or use the inverse transform
+            # Since the data is already normalized, we'll create a copy of the scaler used for power_w
+            target_scaler.min_ = np.array([self.minmax_scaler.min_[self.minmax_columns.index('power_w')]])
+            target_scaler.scale_ = np.array([self.minmax_scaler.scale_[self.minmax_columns.index('power_w')]])
+            target_scaler.data_min_ = np.array([self.minmax_scaler.data_min_[self.minmax_columns.index('power_w')]])
+            target_scaler.data_max_ = np.array([self.minmax_scaler.data_max_[self.minmax_columns.index('power_w')]])
+            target_scaler.data_range_ = np.array([self.minmax_scaler.data_range_[self.minmax_columns.index('power_w')]])
+            target_scaler.n_features_in_ = 1
+            target_scaler.n_samples_seen_ = self.minmax_scaler.n_samples_seen_
+            
+            # Save the target-specific scaler
+            joblib.dump(target_scaler, 'models/target_scaler.pkl')
+            print("Target-specific scaler saved to models/target_scaler.pkl")
+        
         print("Data normalization complete")
         
         return merged

@@ -34,6 +34,8 @@ df.head()
 # Feature selection
 # Define function to prepare feature sets
 
+# This function is for inference and will be handled separately
+# Keeping the function signature for compatibility
 def predict_power(model, feature_scaler, target_scaler, new_data, seq_length=24):
     """
     Args:
@@ -142,31 +144,14 @@ print("Missing values in dataset:")
 print(df[features + [target]].isna().sum())
 
 # %%
-# Data normalization
-scaler_x = MinMaxScaler()
-scaler_y = MinMaxScaler()
+# Data is already scaled in the parquet file, no need for additional scaling
+# Use all features directly from the dataframe
+X = df[features].values
+print(f"Features shape: {X.shape}")
 
-# Fit and transform only the features that need scaling
-scaled_features = scaler_x.fit_transform(df[features_to_scale])
-
-# Get the additional features that don't need scaling
-# These features (day_sin, day_cos, isNight) are already appropriately normalized or binary
-unscaled_features = df[additional_features].values
-
-# Combine scaled and unscaled features to create the complete feature set for training
-X = np.hstack((scaled_features, unscaled_features))
-
-# Print feature dimensions to verify all features are included
-print(f"Scaled features shape: {scaled_features.shape}")
-print(f"Unscaled features shape: {unscaled_features.shape}")
-print(f"Combined features shape: {X.shape}")
-
-# Reshape target to 2D array for scaling
-y = scaler_y.fit_transform(df[[target]])
-
-# Save the scalers for later use
-joblib.dump(scaler_x, 'models/scaler_x.pkl')
-joblib.dump(scaler_y, 'models/scaler_y.pkl')
+# Get target variable (already scaled)
+y = df[[target]].values
+print(f"Target shape: {y.shape}")
 
 # %% [markdown]
 # ## Time Series Data Preparation
@@ -312,7 +297,7 @@ def build_lstm_model(input_shape, config=None):
             model.add(Dropout(dropout_rates[min(len(lstm_units) + i, len(dropout_rates) - 1)]))
     
     # Output layer
-    model.add(Dense(1))
+    model.add(Dense(1, activation='relu'))
     
     # Compile the model
     if config['optimizer'].lower() == 'adam':
@@ -519,9 +504,13 @@ plt.show()
 # Make predictions on the test set
 y_pred = model.predict(X_test)
 
+# Load the target-specific scaler used for power_w
+# This scaler was specifically created for the target variable
+target_scaler = joblib.load('models/target_scaler.pkl')
+
 # Inverse transform the predictions and actual values
-y_test_inv = scaler_y.inverse_transform(y_test)
-y_pred_inv = scaler_y.inverse_transform(y_pred)
+y_test_inv = target_scaler.inverse_transform(y_test)
+y_pred_inv = target_scaler.inverse_transform(y_pred)
 
 # Calculate performance metrics
 mse = mean_squared_error(y_test_inv, y_pred_inv)
@@ -701,19 +690,17 @@ class LSTMForecaster:
         
         target = 'power_w'
         
-        # Data normalization
-        scaler_x = MinMaxScaler()
-        scaler_y = MinMaxScaler()
+        # Data is already scaled in the parquet file, no need for additional scaling
+        # Use all features directly from the dataframe
+        X = df[features].values
+        y = df[[target]].values
         
-        scaled_features = scaler_x.fit_transform(df[features_to_scale])
-        unscaled_features = df[additional_features].values
-        X = np.hstack((scaled_features, unscaled_features))
-        y = scaler_y.fit_transform(df[[target]])
+        print(f"Features shape: {X.shape}")
+        print(f"Target shape: {y.shape}")
         
-        # Save the scalers
-        os.makedirs('models', exist_ok=True)
-        joblib.dump(scaler_x, 'models/scaler_x.pkl')
-        joblib.dump(scaler_y, 'models/scaler_y.pkl')
+        # Load the MinMaxScaler used in preprocessing for inverse transformation later
+        # This is the scaler used for power_w in process_training_data.py
+        minmax_scaler = joblib.load('models/minmax_scaler.pkl')
         
         # Create sequences
         X_seq, y_seq = self._create_sequences(X, y, self.sequence_length)
@@ -742,7 +729,7 @@ class LSTMForecaster:
         )
         
         # Evaluate model
-        metrics = self._evaluate_model(model, X_test, y_test, scaler_y)
+        metrics = self._evaluate_model(model, X_test, y_test, minmax_scaler)
         
         # Save model
         model_path = f"models/lstm/{self.config['feature_set']}_config_{self.config['config_id']}_model.keras"
@@ -750,7 +737,7 @@ class LSTMForecaster:
         print(f"Model saved to {model_path}")
         
         # Plot results
-        self._plot_results(history, y_test, model.predict(X_test), scaler_y)
+        self._plot_results(history, y_test, model.predict(X_test), minmax_scaler)
         
         return {self.config['feature_set']: metrics}
     
@@ -873,14 +860,17 @@ class LSTMForecaster:
         )
         
         return [early_stopping, model_checkpoint, tensorboard_callback]
-    
-    def _evaluate_model(self, model, X_test, y_test, scaler_y):
+    def _evaluate_model(self, model, X_test, y_test, minmax_scaler):
         """Evaluate the model and return metrics"""
         y_pred = model.predict(X_test)
         
-        # Inverse transform
-        y_test_inv = scaler_y.inverse_transform(y_test)
-        y_pred_inv = scaler_y.inverse_transform(y_pred)
+        # Load the target-specific scaler for power_w
+        import joblib
+        target_scaler = joblib.load('models/target_scaler.pkl')
+        
+        # Inverse transform using the target-specific scaler
+        y_test_inv = target_scaler.inverse_transform(y_test)
+        y_pred_inv = target_scaler.inverse_transform(y_pred)
         
         # Calculate metrics
         mse = mean_squared_error(y_test_inv, y_pred_inv)
@@ -901,13 +891,17 @@ class LSTMForecaster:
             'r2': r2
         }
     
-    def _plot_results(self, history, y_test, y_pred, scaler_y):
+    def _plot_results(self, history, y_test, y_pred, minmax_scaler):
         """Plot and save training history and prediction results"""
         os.makedirs('results', exist_ok=True)
         
-        # Inverse transform
-        y_test_inv = scaler_y.inverse_transform(y_test)
-        y_pred_inv = scaler_y.inverse_transform(y_pred)
+        # Load the target-specific scaler for power_w
+        import joblib
+        target_scaler = joblib.load('models/target_scaler.pkl')
+        
+        # Inverse transform using the target-specific scaler
+        y_test_inv = target_scaler.inverse_transform(y_test)
+        y_pred_inv = target_scaler.inverse_transform(y_pred)
         
         # Plot training history
         plt.figure(figsize=(12, 5))

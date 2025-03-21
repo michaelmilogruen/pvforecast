@@ -21,9 +21,9 @@ os.makedirs('models/lstm', exist_ok=True)
 os.makedirs('results', exist_ok=True)
 
 # Set parameters
-SEQUENCE_LENGTH = 24  # Look back 24 time steps (6 hours with 15-min data)
+SEQUENCE_LENGTH = 96  # Look back 24 time steps (6 hours with 15-min data)
 BATCH_SIZE = 64
-EPOCHS = 100
+EPOCHS = 50
 
 print(f"Running LSTM models with parameters:")
 print(f"- Sequence length: {SEQUENCE_LENGTH}")
