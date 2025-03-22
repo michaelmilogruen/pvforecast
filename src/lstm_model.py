@@ -582,7 +582,7 @@ print("Model also saved as the default model for backward compatibility.")
 # %%
 # Class implementation for use with run_lstm_models.py
 class LSTMForecaster:
-    def __init__(self, sequence_length=24, batch_size=32, epochs=50, feature_set='station'):
+    def __init__(self, sequence_length=60, batch_size=32, epochs=50, feature_set='station'):
         self.sequence_length = sequence_length
         self.batch_size = batch_size
         self.epochs = epochs
