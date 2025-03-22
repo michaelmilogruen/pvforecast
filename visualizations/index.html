@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PV Forecasting Visualizations</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+        }
+        h2 {
+            color: #3498db;
+            margin-top: 30px;
+            border-bottom: 1px solid #3498db;
+            padding-bottom: 5px;
+        }
+        .visualization-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .visualization-item {
+            margin: 15px;
+            padding: 10px;
+            background-color: white;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            width: 45%;
+            transition: transform 0.3s ease;
+        }
+        .visualization-item:hover {
+            transform: scale(1.02);
+        }
+        .visualization-item img {
+            width: 100%;
+            border: 1px solid #ddd;
+        }
+        .visualization-item p {
+            text-align: center;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+        .timestamp {
+            text-align: center;
+            color: #7f8c8d;
+            margin-top: 30px;
+            font-size: 0.9em;
+        }
+        #toc {
+            background-color: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        #toc h2 {
+            margin-top: 0;
+        }
+        #toc ul {
+            list-style-type: none;
+            padding-left: 10px;
+        }
+        #toc li {
+            margin: 5px 0;
+        }
+        #toc a {
+            text-decoration: none;
+            color: #2980b9;
+        }
+        #toc a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <h1>PV Forecasting Visualizations for Scientific Paper</h1>
+    
+    <div id="toc">
+        <h2>Table of Contents</h2>
+        <ul>
+            <li><a href="#correlation_analysis">Correlation Analysis</a></li>
+            <li><a href="#correlations">Correlations</a></li>
+            <li><a href="#deep_learning">Deep Learning</a></li>
+            <li><a href="#distributions">Distributions</a></li>
+            <li><a href="#feature_importance">Feature Importance</a></li>
+            <li><a href="#patterns">Patterns</a></li>
+            <li><a href="#resolution_comparison">Resolution Comparison</a></li>
+            <li><a href="#sequence_analysis">Sequence Analysis</a></li>
+            <li><a href="#time_series">Time Series</a></li>
+            <li><a href="#time_series_analysis">Time Series Analysis</a></li>
+            <li><a href="#visualizations">Visualizations</a></li>
+        </ul>
+    </div>
+    <h2 id="correlation_analysis">Correlation Analysis (8 visualizations)</h2>
+    <div class="visualization-container">
+        <div class="visualization-item">
+            <img src="visualizations/correlation_analysis/correlation_heatmap.png" alt="Correlation Heatmap">
+            <p>Correlation Heatmap</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/correlation_analysis/distribution_GL_W_m-2.png" alt="Distribution Gl W M-2">
+            <p>Distribution Gl W M-2</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/correlation_analysis/distribution_T2M_degree_Celsius.png" alt="Distribution T2M Degree Celsius">
+            <p>Distribution T2M Degree Celsius</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/correlation_analysis/distribution_cglo.png" alt="Distribution Cglo">
+            <p>Distribution Cglo</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/correlation_analysis/distribution_tl.png" alt="Distribution Tl">
+            <p>Distribution Tl</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/correlation_analysis/radiation_correlation.png" alt="Radiation Correlation">
+            <p>Radiation Correlation</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/correlation_analysis/temperature_correlation.png" alt="Temperature Correlation">
+            <p>Temperature Correlation</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/correlation_analysis/time_series_comparison.png" alt="Time Series Comparison">
+            <p>Time Series Comparison</p>
+        </div>
+    </div>
+    <h2 id="correlations">Correlations (4 visualizations)</h2>
+    <div class="visualization-container">
+        <div class="visualization-item">
+            <img src="visualizations/correlations/clearsky_index_power.png" alt="Clearsky Index Power">
+            <p>Clearsky Index Power</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/correlations/correlation_matrix.png" alt="Correlation Matrix">
+            <p>Correlation Matrix</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/correlations/feature_importance.png" alt="Feature Importance">
+            <p>Feature Importance</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/correlations/radiation_power_scatter.png" alt="Radiation Power Scatter">
+            <p>Radiation Power Scatter</p>
+        </div>
+    </div>
+    <h2 id="deep_learning">Deep Learning (5 visualizations)</h2>
+    <div class="visualization-container">
+        <div class="visualization-item">
+            <img src="visualizations/deep_learning/day_circular_encoding.png" alt="Day Circular Encoding">
+            <p>Day Circular Encoding</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/deep_learning/hour_circular_encoding.png" alt="Hour Circular Encoding">
+            <p>Hour Circular Encoding</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/deep_learning/hour_power_relationship.png" alt="Hour Power Relationship">
+            <p>Hour Power Relationship</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/deep_learning/month_power_relationship.png" alt="Month Power Relationship">
+            <p>Month Power Relationship</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/deep_learning/normalized_sequence.png" alt="Normalized Sequence">
+            <p>Normalized Sequence</p>
+        </div>
+    </div>
+    <h2 id="distributions">Distributions (2 visualizations)</h2>
+    <div class="visualization-container">
+        <div class="visualization-item">
+            <img src="visualizations/distributions/key_variables_dist.png" alt="Key Variables Dist">
+            <p>Key Variables Dist</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/distributions/power_boxplot_hourly.png" alt="Power Boxplot Hourly">
+            <p>Power Boxplot Hourly</p>
+        </div>
+    </div>
+    <h2 id="feature_importance">Feature Importance (1 visualizations)</h2>
+    <div class="visualization-container">
+        <div class="visualization-item">
+            <img src="visualizations/feature_importance/mutual_information.png" alt="Mutual Information">
+            <p>Mutual Information</p>
+        </div>
+    </div>
+    <h2 id="patterns">Patterns (3 visualizations)</h2>
+    <div class="visualization-container">
+        <div class="visualization-item">
+            <img src="visualizations/patterns/daily_pattern.png" alt="Daily Pattern">
+            <p>Daily Pattern</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/patterns/monthly_pattern.png" alt="Monthly Pattern">
+            <p>Monthly Pattern</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/patterns/power_heatmap.png" alt="Power Heatmap">
+            <p>Power Heatmap</p>
+        </div>
+    </div>
+    <h2 id="resolution_comparison">Resolution Comparison (7 visualizations)</h2>
+    <div class="visualization-container">
+        <div class="visualization-item">
+            <img src="visualizations/resolution_comparison/autocorrelation_comparison.png" alt="Autocorrelation Comparison">
+            <p>Autocorrelation Comparison</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/resolution_comparison/distribution_comparison.png" alt="Distribution Comparison">
+            <p>Distribution Comparison</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/resolution_comparison/information_loss_metrics.png" alt="Information Loss Metrics">
+            <p>Information Loss Metrics</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/resolution_comparison/rate_of_change.png" alt="Rate Of Change">
+            <p>Rate Of Change</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/resolution_comparison/resolution_comparison_day.png" alt="Resolution Comparison Day">
+            <p>Resolution Comparison Day</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/resolution_comparison/spectral_analysis.png" alt="Spectral Analysis">
+            <p>Spectral Analysis</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/resolution_comparison/variability_comparison.png" alt="Variability Comparison">
+            <p>Variability Comparison</p>
+        </div>
+    </div>
+    <h2 id="sequence_analysis">Sequence Analysis (1 visualizations)</h2>
+    <div class="visualization-container">
+        <div class="visualization-item">
+            <img src="visualizations/sequence_analysis/sequence_visualization.png" alt="Sequence Visualization">
+            <p>Sequence Visualization</p>
+        </div>
+    </div>
+    <h2 id="time_series">Time Series (6 visualizations)</h2>
+    <div class="visualization-container">
+        <div class="visualization-item">
+            <img src="visualizations/time_series/measured_vs_clearsky.png" alt="Measured Vs Clearsky">
+            <p>Measured Vs Clearsky</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/time_series/power_autocorrelation.png" alt="Power Autocorrelation">
+            <p>Power Autocorrelation</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/time_series/power_lag_plot.png" alt="Power Lag Plot">
+            <p>Power Lag Plot</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/time_series/power_time_series.png" alt="Power Time Series">
+            <p>Power Time Series</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/time_series/radiation_power_hourly.png" alt="Radiation Power Hourly">
+            <p>Radiation Power Hourly</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/time_series/resolution_comparison.png" alt="Resolution Comparison">
+            <p>Resolution Comparison</p>
+        </div>
+    </div>
+    <h2 id="time_series_analysis">Time Series Analysis (5 visualizations)</h2>
+    <div class="visualization-container">
+        <div class="visualization-item">
+            <img src="visualizations/time_series_analysis/acf_pacf.png" alt="Acf Pacf">
+            <p>Acf Pacf</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/time_series_analysis/rolling_statistics.png" alt="Rolling Statistics">
+            <p>Rolling Statistics</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/time_series_analysis/seasonal_decomposition_annual.png" alt="Seasonal Decomposition Annual">
+            <p>Seasonal Decomposition Annual</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/time_series_analysis/seasonal_decomposition_weekly.png" alt="Seasonal Decomposition Weekly">
+            <p>Seasonal Decomposition Weekly</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/time_series_analysis/stationarity_test.png" alt="Stationarity Test">
+            <p>Stationarity Test</p>
+        </div>
+    </div>
+    <h2 id="visualizations">Visualizations (3 visualizations)</h2>
+    <div class="visualization-container">
+        <div class="visualization-item">
+            <img src="visualizations/energy_yield_monthly_sum.png" alt="Energy Yield Monthly Sum">
+            <p>Energy Yield Monthly Sum</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/energy_yield_start_to_end.png" alt="Energy Yield Start To End">
+            <p>Energy Yield Start To End</p>
+        </div>
+        <div class="visualization-item">
+            <img src="visualizations/global_picture.png" alt="Global Picture">
+            <p>Global Picture</p>
+        </div>
+    </div>
+    <p class="timestamp">Generated on 2025-03-22 09:57:58</p>
+</body>
+</html>

@@ -205,17 +205,41 @@ class StationDataProcessor:
         for col in df.columns:
             if df[col].dtype == 'object':
                 df[col] = df[col].str.strip()
-        
-        # Convert datetime
+                
+        # Get the date column name
         date_col = df.columns[0]  # First column should be the date
         print(f"\nUsing {date_col} as date column")
-        df[date_col] = pd.to_datetime(df[date_col], format='%d.%m.%Y %H:%M')
+        
+        # Parse timestamps as UTC+1 (local time for Austria/Leoben)
+        # Create a new datetime column instead of modifying the original
+        df['datetime'] = pd.to_datetime(df[date_col], format='%d.%m.%Y %H:%M')
+        
+        # Explicitly set timezone to UTC+1
+        local_tz = 'Etc/GMT-1'  # Note: Etc/GMT-1 is actually UTC+1 (the sign is inverted in Etc/GMT)
+        df['datetime'] = df['datetime'].dt.tz_localize(local_tz)
+        
+        # Convert to UTC to match station data
+        df['datetime'] = df['datetime'].dt.tz_convert('UTC')
+        
+        # Remove timezone info to match station data format
+        df['datetime'] = df['datetime'].dt.tz_localize(None)
+        
+        print(f"Converted PV timestamps from local time (UTC+1) to UTC")
         
         # Set datetime as index
-        df.set_index(date_col, inplace=True)
+        df.set_index('datetime', inplace=True)
         
-        # Rename columns for consistency
-        df.columns = ['energy_wh', 'energy_interval', 'power_w']
+        # Check the columns we have
+        print(f"Columns after setting index: {df.columns.tolist()}")
+        
+        # Rename columns for consistency - make sure we match the number of columns
+        if len(df.columns) == 4:  # Including the original date column
+            df.columns = ['date_col', 'energy_wh', 'energy_interval', 'power_w']
+            # Drop the original date column if it's still there
+            if 'date_col' in df.columns:
+                df = df.drop(columns=['date_col'])
+        elif len(df.columns) == 3:
+            df.columns = ['energy_wh', 'energy_interval', 'power_w']
         
         # Convert to numeric, coercing errors to NaN
         for col in df.columns:
@@ -267,6 +291,30 @@ class StationDataProcessor:
         # Process PV data
         pv_df = self.process_pv_data(pv_path)
         
+        # Define the start timestamp (14.07.2022 19:55)
+        start_timestamp = pd.Timestamp('2022-07-14 19:55:00')
+        print(f"\nFiltering data to start from {start_timestamp}")
+        
+        # Filter station data to start from the specified timestamp
+        station_df = station_df[station_df.index >= start_timestamp]
+        print(f"Filtered station data shape: {station_df.shape}")
+        print(f"Station data starts at: {station_df.index.min()}")
+        
+        # Filter PV data to start from the specified timestamp
+        pv_df = pv_df[pv_df.index >= start_timestamp]
+        print(f"Filtered PV data shape: {pv_df.shape}")
+        print(f"PV data starts at: {pv_df.index.min()}")
+        
+        # Verify that both datasets start at the same timestamp
+        if station_df.index.min() != pv_df.index.min():
+            print(f"WARNING: Start timestamps don't match exactly!")
+            print(f"Station data starts at: {station_df.index.min()}")
+            print(f"PV data starts at: {pv_df.index.min()}")
+            time_diff = abs((station_df.index.min() - pv_df.index.min()).total_seconds() / 60)
+            print(f"Time difference: {time_diff} minutes")
+        else:
+            print("Both datasets start at the same timestamp. Good!")
+        
         # Merge station data with PV data
         print("\nMerging station data with PV data...")
         print(f"Station data shape: {station_df.shape}")
@@ -277,9 +325,30 @@ class StationDataProcessor:
         pv_df_resampled = pv_df.resample(self.high_res_frequency).mean()
         print(f"Resampled PV data shape: {pv_df_resampled.shape}")
         
-        # Merge on datetime index
+        # Check if timestamps match before joining
+        print("Checking if timestamps match before joining...")
+        station_timestamps = set(station_df.index)
+        pv_timestamps = set(pv_df_resampled.index)
+        
+        # Find common timestamps
+        common_timestamps = station_timestamps.intersection(pv_timestamps)
+        print(f"Number of common timestamps: {len(common_timestamps)}")
+        
+        # Find missing timestamps in each dataset
+        missing_in_station = pv_timestamps - station_timestamps
+        missing_in_pv = station_timestamps - pv_timestamps
+        
+        if missing_in_station:
+            print(f"Warning: {len(missing_in_station)} timestamps in PV data are missing in station data")
+            print(f"First few missing timestamps in station data: {sorted(list(missing_in_station))[:5]}")
+        
+        if missing_in_pv:
+            print(f"Warning: {len(missing_in_pv)} timestamps in station data are missing in PV data")
+            print(f"First few missing timestamps in PV data: {sorted(list(missing_in_pv))[:5]}")
+        
+        # Merge on datetime index (using left join to preserve all station data timestamps)
         merged_df = pd.merge(station_df, pv_df_resampled, left_index=True, right_index=True, how='left')
-        print(f"Merged data shape: {merged_df.shape}")
+        print(f"Merged data shape (left join): {merged_df.shape}")
         
         # Handle missing values in target columns
         print("Handling missing values in target columns...")
