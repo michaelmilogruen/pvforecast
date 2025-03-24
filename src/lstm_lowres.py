@@ -6,6 +6,12 @@ LSTM Model for PV Power Forecasting with Low Resolution (1-hour) Data
 This script implements an LSTM (Long Short-Term Memory) neural network for forecasting 
 photovoltaic power output using 1-hour resolution data. It includes data loading, 
 preprocessing, model training, and evaluation.
+
+Key features:
+1. Data preprocessing and feature scaling
+2. LSTM model architecture
+3. Hyperparameter optimization using Bayesian optimization with Optuna
+4. Model evaluation and visualization
 """
 
 import numpy as np
@@ -13,12 +19,15 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization, Bidirectional
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import joblib
 import os
+import optuna
 from datetime import datetime
+import argparse
 
 # Set random seeds for reproducibility
 np.random.seed(42)
@@ -41,16 +50,19 @@ class LSTMLowResForecaster:
         # Create directories for model and results
         os.makedirs('models/lstm_lowres', exist_ok=True)
         os.makedirs('results', exist_ok=True)
+        os.makedirs('results/lstm_lowres_optuna', exist_ok=True)
         
         # Timestamp for model versioning
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Simple model configuration
+        # Default model configuration (will be updated by hyperparameter optimization)
         self.config = {
-            'lstm_units': [64, 32],
-            'dense_units': [16],
-            'dropout_rates': [0.2, 0.2],
-            'learning_rate': 0.001
+            'lstm_units': [64, 32, 16],  # Default 3 LSTM layers
+            'dense_units': [16, 8],      # Default 2 dense layers
+            'dropout_rates': [0.2] * 5,  # Default dropout rate for all layers
+            'learning_rate': 0.001,
+            'bidirectional': False,
+            'batch_norm': False
         }
     
     def load_and_prepare_data(self, data_path):
@@ -174,6 +186,9 @@ class LSTMLowResForecaster:
         standard_scaler = StandardScaler() if feature_info['standard_features'] else None
         robust_scaler = RobustScaler() if feature_info['robust_features'] else None
         
+        # Initialize target scaler
+        target_scaler = MinMaxScaler(feature_range=(0, 1))
+        
         # Fit scalers on training data only to prevent data leakage
         if minmax_scaler:
             minmax_scaler.fit(train_df[feature_info['minmax_features']])
@@ -186,6 +201,10 @@ class LSTMLowResForecaster:
         if robust_scaler:
             robust_scaler.fit(train_df[feature_info['robust_features']])
             joblib.dump(robust_scaler, f'models/lstm_lowres/robust_scaler_{self.timestamp}.pkl')
+        
+        # Fit target scaler on training data
+        target_scaler.fit(train_df[[feature_info['target']]])
+        joblib.dump(target_scaler, f'models/lstm_lowres/target_scaler_{self.timestamp}.pkl')
         
         # Function to scale features using appropriate scalers
         def scale_features(df_subset):
@@ -224,10 +243,10 @@ class LSTMLowResForecaster:
         X_val = scale_features(val_df)
         X_test = scale_features(test_df)
         
-        # Extract target (no scaling as per requirement)
-        y_train = train_df[[feature_info['target']]].values
-        y_val = val_df[[feature_info['target']]].values
-        y_test = test_df[[feature_info['target']]].values
+        # Scale target variable
+        y_train = target_scaler.transform(train_df[[feature_info['target']]])
+        y_val = target_scaler.transform(val_df[[feature_info['target']]])
+        y_test = target_scaler.transform(test_df[[feature_info['target']]])
         
         return {
             'X_train': X_train, 'y_train': y_train,
@@ -236,7 +255,8 @@ class LSTMLowResForecaster:
             'scalers': {
                 'minmax': minmax_scaler,
                 'standard': standard_scaler,
-                'robust': robust_scaler
+                'robust': robust_scaler,
+                'target': target_scaler
             }
         }
     
@@ -261,68 +281,322 @@ class LSTMLowResForecaster:
             
         return np.array(X_seq), np.array(y_seq)
     
-    def build_model(self, input_shape):
+    def build_model(self, input_shape, trial=None):
         """
-        Build a simple LSTM model.
+        Build an LSTM model with optional hyperparameters from Optuna trial.
         
         Args:
             input_shape: Shape of input data (time_steps, features)
+            trial: Optuna trial object for hyperparameter optimization (optional)
             
         Returns:
             Compiled LSTM model
         """
         model = Sequential()
         
-        # First LSTM layer
-        model.add(LSTM(
-            units=self.config['lstm_units'][0],
-            return_sequences=True if len(self.config['lstm_units']) > 1 else False,
-            input_shape=input_shape
-        ))
-        model.add(Dropout(self.config['dropout_rates'][0]))
+        # If trial is provided, use it to suggest hyperparameters
+        if trial:
+            # Suggest hyperparameters using Optuna
+            # Number of layers
+            num_lstm_layers = trial.suggest_int('num_lstm_layers', 1, 3)
+            num_dense_layers = trial.suggest_int('num_dense_layers', 1, 3)
+            
+            # LSTM units for each layer - use consistent parameter ranges for each position
+            lstm_units = []
+            if num_lstm_layers >= 1:
+                # First layer typically has more units
+                lstm_units.append(trial.suggest_int('lstm_units_1', 32, 256))
+            
+            if num_lstm_layers >= 2:
+                # Second layer
+                lstm_units.append(trial.suggest_int('lstm_units_2', 16, 128))
+            
+            if num_lstm_layers >= 3:
+                # Third layer typically has fewer units
+                lstm_units.append(trial.suggest_int('lstm_units_3', 8, 64))
+            
+            # Dense units for each layer - use consistent parameter ranges for each position
+            dense_units = []
+            if num_dense_layers >= 1:
+                # First dense layer
+                dense_units.append(trial.suggest_int('dense_units_1', 16, 64))
+            
+            if num_dense_layers >= 2:
+                # Second dense layer
+                dense_units.append(trial.suggest_int('dense_units_2', 8, 32))
+                
+            if num_dense_layers >= 3:
+                # Third dense layer
+                dense_units.append(trial.suggest_int('dense_units_3', 4, 16))
+            
+            dropout_rate = trial.suggest_float('dropout_rate', 0.1, 0.5)
+            learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)
+            bidirectional = trial.suggest_categorical('bidirectional', [True, False])
+            batch_norm = trial.suggest_categorical('batch_norm', [True, False])
+            
+            # Update config with suggested hyperparameters
+            dropout_rates = [dropout_rate] * (num_lstm_layers + num_dense_layers)  # Same dropout rate for all layers
+        else:
+            # Use existing configuration
+            lstm_units = self.config['lstm_units']
+            dense_units = self.config['dense_units']
+            dropout_rates = self.config['dropout_rates']
+            learning_rate = self.config['learning_rate']
+            bidirectional = self.config['bidirectional']
+            batch_norm = self.config['batch_norm']
+            num_lstm_layers = len(lstm_units)
+            num_dense_layers = len(dense_units)
         
-        # Additional LSTM layers (if any)
-        for i in range(1, len(self.config['lstm_units'])):
-            return_sequences = i < len(self.config['lstm_units']) - 1
-            model.add(LSTM(units=self.config['lstm_units'][i], return_sequences=return_sequences))
-            model.add(Dropout(self.config['dropout_rates'][min(i, len(self.config['dropout_rates'])-1)]))
+        # First LSTM layer
+        if bidirectional:
+            model.add(Bidirectional(
+                LSTM(units=lstm_units[0], return_sequences=(num_lstm_layers > 1)),
+                input_shape=input_shape
+            ))
+        else:
+            model.add(LSTM(
+                units=lstm_units[0],
+                return_sequences=(num_lstm_layers > 1),
+                input_shape=input_shape
+            ))
+        
+        if batch_norm:
+            model.add(BatchNormalization())
+        
+        model.add(Dropout(dropout_rates[0]))
+        
+        # Middle LSTM layers (if any)
+        for i in range(1, num_lstm_layers):
+            is_last_lstm = (i == num_lstm_layers - 1)
+            if bidirectional:
+                model.add(Bidirectional(
+                    LSTM(units=lstm_units[i], return_sequences=not is_last_lstm)
+                ))
+            else:
+                model.add(LSTM(
+                    units=lstm_units[i],
+                    return_sequences=not is_last_lstm
+                ))
+            
+            if batch_norm:
+                model.add(BatchNormalization())
+            
+            model.add(Dropout(dropout_rates[min(i, len(dropout_rates)-1)]))
         
         # Dense layers
-        for i, units in enumerate(self.config['dense_units']):
-            model.add(Dense(units, activation='relu'))
+        for i in range(num_dense_layers):
+            model.add(Dense(dense_units[i], activation='relu'))
+            
+            if batch_norm:
+                model.add(BatchNormalization())
+            
+            if i < num_dense_layers - 1:  # No dropout after the last dense layer
+                model.add(Dropout(dropout_rates[min(num_lstm_layers + i, len(dropout_rates)-1)]))
         
         # Output layer
         model.add(Dense(1))
         
         # Compile model
-        optimizer = tf.keras.optimizers.Adam(learning_rate=self.config['learning_rate'])
+        optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
         model.compile(optimizer=optimizer, loss='mse', metrics=['mae'])
         
         return model
     
-    def create_callbacks(self):
+    def create_callbacks(self, trial=None):
         """
         Create callbacks for model training.
         
+        Args:
+            trial: Optuna trial object (optional)
+            
         Returns:
             List of callbacks
         """
-        early_stopping = tf.keras.callbacks.EarlyStopping(
+        callbacks = []
+        
+        # Early stopping
+        early_stopping = EarlyStopping(
             monitor='val_loss',
             patience=10,
             restore_best_weights=True
         )
+        callbacks.append(early_stopping)
         
-        model_checkpoint = tf.keras.callbacks.ModelCheckpoint(
-            filepath=f'models/lstm_lowres/model_{self.timestamp}.keras',
+        # Model checkpoint (only for final model, not during hyperparameter search)
+        if trial is None:
+            model_checkpoint = ModelCheckpoint(
+                filepath=f'models/lstm_lowres/model_{self.timestamp}.keras',
+                monitor='val_loss',
+                save_best_only=True,
+                verbose=1
+            )
+            callbacks.append(model_checkpoint)
+        
+        # Learning rate reduction
+        reduce_lr = ReduceLROnPlateau(
             monitor='val_loss',
-            save_best_only=True,
-            verbose=1
+            factor=0.5,
+            patience=5,
+            min_lr=1e-6,
+            verbose=0 if trial else 1  # Less verbose during hyperparameter search
+        )
+        callbacks.append(reduce_lr)
+        
+        # Add Optuna pruning callback if trial is provided
+        if trial:
+            pruning_callback = optuna.integration.TFKerasPruningCallback(
+                trial, 'val_loss'
+            )
+            callbacks.append(pruning_callback)
+        
+        return callbacks
+    
+    def objective(self, trial, X_train_seq, y_train_seq, X_val_seq, y_val_seq):
+        """
+        Objective function for Optuna optimization.
+        
+        Args:
+            trial: Optuna trial object
+            X_train_seq: Training sequences
+            y_train_seq: Training targets
+            X_val_seq: Validation sequences
+            y_val_seq: Validation targets
+            
+        Returns:
+            Validation loss (to be minimized)
+        """
+        # Build model with hyperparameters from trial
+        input_shape = (X_train_seq.shape[1], X_train_seq.shape[2])
+        model = self.build_model(input_shape, trial)
+        
+        # Create callbacks with pruning
+        callbacks = self.create_callbacks(trial)
+        
+        # Train model with fewer epochs for hyperparameter search
+        history = model.fit(
+            X_train_seq, y_train_seq,
+            epochs=20,  # Reduced epochs for hyperparameter search
+            batch_size=self.batch_size,
+            validation_data=(X_val_seq, y_val_seq),
+            callbacks=callbacks,
+            verbose=0  # Silent training during hyperparameter search
         )
         
-        return [early_stopping, model_checkpoint]
+        # Return the best validation loss
+        return history.history['val_loss'][-1]
     
-    def evaluate_model(self, model, X_test_seq, y_test):
+    def optimize_hyperparameters(self, X_train_seq, y_train_seq, X_val_seq, y_val_seq, n_trials=50):
+        """
+        Optimize hyperparameters using Optuna's Bayesian optimization.
+        
+        Args:
+            X_train_seq: Training sequences
+            y_train_seq: Training targets
+            X_val_seq: Validation sequences
+            y_val_seq: Validation targets
+            n_trials: Number of optimization trials
+            
+        Returns:
+            Dictionary with optimized hyperparameters
+        """
+        print("\nStarting hyperparameter optimization using Bayesian optimization with Optuna...")
+        
+        # Create a study object with pruning
+        pruner = optuna.pruners.MedianPruner(
+            n_startup_trials=5,
+            n_warmup_steps=5,
+            interval_steps=1
+        )
+        
+        study = optuna.create_study(
+            direction='minimize',
+            pruner=pruner,
+            study_name=f'lstm_lowres_study_{self.timestamp}'
+        )
+        
+        # Define the objective function
+        objective_func = lambda trial: self.objective(
+            trial, X_train_seq, y_train_seq, X_val_seq, y_val_seq
+        )
+        
+        # Run the optimization
+        study.optimize(objective_func, n_trials=n_trials)
+        
+        # Get best parameters
+        best_params = study.best_params
+        print("\nBest hyperparameters:")
+        for param, value in best_params.items():
+            print(f"{param}: {value}")
+        
+        # Update config with best parameters
+        num_lstm_layers = best_params['num_lstm_layers']
+        num_dense_layers = best_params['num_dense_layers']
+        
+        # Extract LSTM units
+        lstm_units = []
+        for i in range(1, num_lstm_layers + 1):
+            if f'lstm_units_{i}' in best_params:
+                lstm_units.append(best_params[f'lstm_units_{i}'])
+        self.config['lstm_units'] = lstm_units
+        
+        # Extract dense units
+        dense_units = []
+        for i in range(1, num_dense_layers + 1):
+            if f'dense_units_{i}' in best_params:
+                dense_units.append(best_params[f'dense_units_{i}'])
+        self.config['dense_units'] = dense_units
+        self.config['dropout_rates'] = [best_params['dropout_rate']] * 5  # Use same dropout rate for all layers
+        self.config['learning_rate'] = best_params['learning_rate']
+        self.config['bidirectional'] = best_params['bidirectional']
+        self.config['batch_norm'] = best_params['batch_norm']
+        
+        # Save hyperparameter search results
+        self.plot_optuna_results(study)
+        
+        # Save study for later analysis
+        joblib.dump(study, f'results/lstm_lowres_optuna/study_{self.timestamp}.pkl')
+        
+        return best_params
+    
+    def plot_optuna_results(self, study):
+        """
+        Plot and save Optuna optimization results.
+        
+        Args:
+            study: Optuna study object
+        """
+        # Create directory for plots
+        os.makedirs('results/lstm_lowres_optuna', exist_ok=True)
+        
+        # Plot optimization history
+        plt.figure(figsize=(10, 6))
+        optuna.visualization.matplotlib.plot_optimization_history(study)
+        plt.tight_layout()
+        plt.savefig(f'results/lstm_lowres_optuna/optimization_history_{self.timestamp}.png')
+        
+        # Plot parameter importances
+        plt.figure(figsize=(10, 6))
+        optuna.visualization.matplotlib.plot_param_importances(study)
+        plt.tight_layout()
+        plt.savefig(f'results/lstm_lowres_optuna/param_importances_{self.timestamp}.png')
+        
+        # Plot parallel coordinate plot
+        plt.figure(figsize=(12, 8))
+        optuna.visualization.matplotlib.plot_parallel_coordinate(study)
+        plt.tight_layout()
+        plt.savefig(f'results/lstm_lowres_optuna/parallel_coordinate_{self.timestamp}.png')
+        
+        # Plot slice plots for key hyperparameters
+        key_params = ['num_lstm_layers', 'num_dense_layers', 'learning_rate', 'dropout_rate']
+        for param in key_params:
+            plt.figure(figsize=(10, 6))
+            optuna.visualization.matplotlib.plot_slice(study, params=[param])
+            plt.tight_layout()
+            plt.savefig(f'results/lstm_lowres_optuna/slice_{param}_{self.timestamp}.png')
+        
+        print(f"Optuna visualization plots saved to results/lstm_lowres_optuna/")
+    
+    def evaluate_model(self, model, X_test_seq, y_test, target_scaler=None):
         """
         Evaluate the model and return metrics.
         
@@ -330,6 +604,7 @@ class LSTMLowResForecaster:
             model: Trained LSTM model
             X_test_seq: Test sequences
             y_test: True target values
+            target_scaler: Scaler for the target variable (optional)
             
         Returns:
             Dictionary of evaluation metrics
@@ -337,26 +612,59 @@ class LSTMLowResForecaster:
         # Make predictions
         y_pred = model.predict(X_test_seq)
         
-        # Calculate metrics (no inverse transform needed as we're not scaling the target)
-        mse = mean_squared_error(y_test, y_pred)
-        rmse = np.sqrt(mse)
-        mae = mean_absolute_error(y_test, y_pred)
-        r2 = r2_score(y_test, y_pred)
+        # Calculate metrics on scaled data
+        mse_scaled = mean_squared_error(y_test, y_pred)
+        rmse_scaled = np.sqrt(mse_scaled)
+        mae_scaled = mean_absolute_error(y_test, y_pred)
+        r2_scaled = r2_score(y_test, y_pred)
         
-        print("\nModel Evaluation:")
-        print(f"Mean Squared Error (MSE): {mse:.4f}")
-        print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
-        print(f"Mean Absolute Error (MAE): {mae:.4f}")
-        print(f"R² Score: {r2:.4f}")
+        print("\nModel Evaluation (Scaled):")
+        print(f"Mean Squared Error (MSE): {mse_scaled:.4f}")
+        print(f"Root Mean Squared Error (RMSE): {rmse_scaled:.4f}")
+        print(f"Mean Absolute Error (MAE): {mae_scaled:.4f}")
+        print(f"R² Score: {r2_scaled:.4f}")
         
-        return {
-            'mse': mse,
-            'rmse': rmse,
-            'mae': mae,
-            'r2': r2,
-            'y_test': y_test,
-            'y_pred': y_pred
-        }
+        # If target scaler is provided, inverse transform predictions and true values
+        if target_scaler:
+            y_test_inv = target_scaler.inverse_transform(y_test)
+            y_pred_inv = target_scaler.inverse_transform(y_pred)
+            
+            # Calculate metrics on original scale
+            mse = mean_squared_error(y_test_inv, y_pred_inv)
+            rmse = np.sqrt(mse)
+            mae = mean_absolute_error(y_test_inv, y_pred_inv)
+            r2 = r2_score(y_test_inv, y_pred_inv)
+            
+            print("\nModel Evaluation (Original Scale):")
+            print(f"Mean Squared Error (MSE): {mse:.4f}")
+            print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
+            print(f"Mean Absolute Error (MAE): {mae:.4f}")
+            print(f"R² Score: {r2:.4f}")
+            
+            return {
+                'mse': mse,
+                'rmse': rmse,
+                'mae': mae,
+                'r2': r2,
+                'mse_scaled': mse_scaled,
+                'rmse_scaled': rmse_scaled,
+                'mae_scaled': mae_scaled,
+                'r2_scaled': r2_scaled,
+                'y_test_inv': y_test_inv,
+                'y_pred_inv': y_pred_inv,
+                'y_test': y_test,
+                'y_pred': y_pred
+            }
+        else:
+            # No target scaling was applied
+            return {
+                'mse': mse_scaled,
+                'rmse': rmse_scaled,
+                'mae': mae_scaled,
+                'r2': r2_scaled,
+                'y_test': y_test,
+                'y_pred': y_pred
+            }
     
     def plot_results(self, history, evaluation_results):
         """
@@ -388,38 +696,72 @@ class LSTMLowResForecaster:
         plt.tight_layout()
         plt.savefig(f'results/lstm_lowres_history_{self.timestamp}.png')
         
-        # Plot predictions vs actual
+        # Check if we have inverse-transformed data
+        has_inverse_transform = 'y_test_inv' in evaluation_results
+        
+        # Plot predictions vs actual (scaled)
         plt.figure(figsize=(14, 7))
         
         sample_size = min(500, len(evaluation_results['y_test']))
         indices = np.arange(sample_size)
         
-        plt.plot(indices, evaluation_results['y_test'][:sample_size], 'b-', label='Actual Power Output')
-        plt.plot(indices, evaluation_results['y_pred'][:sample_size], 'r-', label='Predicted Power Output')
-        plt.title('Actual vs Predicted PV Power')
+        plt.plot(indices, evaluation_results['y_test'][:sample_size], 'b-', label='Actual (Scaled)')
+        plt.plot(indices, evaluation_results['y_pred'][:sample_size], 'r-', label='Predicted (Scaled)')
+        plt.title('Actual vs Predicted PV Power (Scaled)')
         plt.xlabel('Time Steps')
-        plt.ylabel('Power Output (W)')
+        plt.ylabel('Power Output (Scaled)')
         plt.legend()
         plt.grid(True)
         
-        plt.savefig(f'results/lstm_lowres_predictions_{self.timestamp}.png')
+        plt.savefig(f'results/lstm_lowres_predictions_scaled_{self.timestamp}.png')
         
-        # Create scatter plot
-        plt.figure(figsize=(10, 8))
-        plt.scatter(evaluation_results['y_test'], evaluation_results['y_pred'], alpha=0.5)
-        plt.plot([evaluation_results['y_test'].min(), evaluation_results['y_test'].max()], 
-                 [evaluation_results['y_test'].min(), evaluation_results['y_test'].max()], 'r--')
-        plt.title('Actual vs Predicted')
-        plt.xlabel('Actual Power Output (W)')
-        plt.ylabel('Predicted Power Output (W)')
-        plt.grid(True)
-        
-        plt.savefig(f'results/lstm_lowres_scatter_{self.timestamp}.png')
+        # If we have inverse-transformed data, plot it
+        if has_inverse_transform:
+            # Plot predictions vs actual (original scale)
+            plt.figure(figsize=(14, 7))
+            
+            plt.plot(indices, evaluation_results['y_test_inv'][:sample_size], 'b-', label='Actual Power Output')
+            plt.plot(indices, evaluation_results['y_pred_inv'][:sample_size], 'r-', label='Predicted Power Output')
+            plt.title('Actual vs Predicted PV Power')
+            plt.xlabel('Time Steps')
+            plt.ylabel('Power Output (W)')
+            plt.legend()
+            plt.grid(True)
+            
+            plt.savefig(f'results/lstm_lowres_predictions_{self.timestamp}.png')
+            
+            # Create scatter plot (original scale)
+            plt.figure(figsize=(10, 8))
+            plt.scatter(evaluation_results['y_test_inv'], evaluation_results['y_pred_inv'], alpha=0.5)
+            plt.plot([evaluation_results['y_test_inv'].min(), evaluation_results['y_test_inv'].max()], 
+                     [evaluation_results['y_test_inv'].min(), evaluation_results['y_test_inv'].max()], 'r--')
+            plt.title('Actual vs Predicted')
+            plt.xlabel('Actual Power Output (W)')
+            plt.ylabel('Predicted Power Output (W)')
+            plt.grid(True)
+            
+            plt.savefig(f'results/lstm_lowres_scatter_{self.timestamp}.png')
+        else:
+            # Create scatter plot (scaled)
+            plt.figure(figsize=(10, 8))
+            plt.scatter(evaluation_results['y_test'], evaluation_results['y_pred'], alpha=0.5)
+            plt.plot([evaluation_results['y_test'].min(), evaluation_results['y_test'].max()], 
+                     [evaluation_results['y_test'].min(), evaluation_results['y_test'].max()], 'r--')
+            plt.title('Actual vs Predicted (Scaled)')
+            plt.xlabel('Actual Power Output (Scaled)')
+            plt.ylabel('Predicted Power Output (Scaled)')
+            plt.grid(True)
+            
+            plt.savefig(f'results/lstm_lowres_scatter_{self.timestamp}.png')
     
-    def run_pipeline(self):
+    def run_pipeline(self, optimize_hyperparams=True, n_trials=50):
         """
         Run the full LSTM forecasting pipeline for low-resolution data.
         
+        Args:
+            optimize_hyperparams: Whether to perform hyperparameter optimization
+            n_trials: Number of optimization trials
+            
         Returns:
             Dictionary of evaluation metrics
         """
@@ -449,7 +791,20 @@ class LSTMLowResForecaster:
         print(f"Validation sequences shape: {X_val_seq.shape}")
         print(f"Testing sequences shape: {X_test_seq.shape}")
         
-        # Build model
+        # Perform hyperparameter optimization if requested
+        if optimize_hyperparams:
+            print("\nPerforming hyperparameter optimization...")
+            best_params = self.optimize_hyperparameters(
+                X_train_seq, y_train_seq, X_val_seq, y_val_seq, n_trials=n_trials
+            )
+            print(f"Optimized hyperparameters: {best_params}")
+            # Save optimized hyperparameters
+            with open(f'models/lstm_lowres/best_params_{self.timestamp}.txt', 'w', encoding='utf-8') as f:
+                for param, value in best_params.items():
+                    f.write(f"{param}: {value}\n")
+                    f.write(f"{param}: {value}\n")
+        
+        # Build model with optimized hyperparameters
         input_shape = (X_train_seq.shape[1], X_train_seq.shape[2])
         model = self.build_model(input_shape)
         model.summary()
@@ -471,7 +826,7 @@ class LSTMLowResForecaster:
         # Evaluate model
         print("\nEvaluating model...")
         evaluation_results = self.evaluate_model(
-            model, X_test_seq, y_test_seq
+            model, X_test_seq, y_test_seq, data['scalers']['target']
         )
         
         # Plot results
@@ -481,10 +836,23 @@ class LSTMLowResForecaster:
         model.save(f'models/lstm_lowres/final_model_{self.timestamp}.keras')
         print(f"Model saved to models/lstm_lowres/final_model_{self.timestamp}.keras")
         
+        # Save model summary to file
+        with open(f'models/lstm_lowres/model_summary_{self.timestamp}.txt', 'w', encoding='utf-8') as f:
+            model.summary(print_fn=lambda x: f.write(x + '\n'))
+        
         return evaluation_results
 
 
 if __name__ == "__main__":
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Run LSTM model with Bayesian hyperparameter optimization')
+    parser.add_argument('--optimize', action='store_true', help='Perform hyperparameter optimization')
+    parser.add_argument('--sequence_length', type=int, default=24, help='Sequence length (hours to look back)')
+    parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
+    parser.add_argument('--epochs', type=int, default=50, help='Maximum number of epochs for training')
+    parser.add_argument('--trials', type=int, default=50, help='Number of optimization trials')
+    args = parser.parse_args()
+    
     # Check for GPU availability
     print("TensorFlow version:", tf.__version__)
     print("GPU Available:", tf.config.list_physical_devices('GPU'))
@@ -500,14 +868,19 @@ if __name__ == "__main__":
             print(f"Error setting memory growth: {e}")
     
     # Set parameters
-    SEQUENCE_LENGTH = 24  # Look back 24 hours (1 day with 1-hour data)
-    BATCH_SIZE = 32
-    EPOCHS = 50
+    SEQUENCE_LENGTH = args.sequence_length
+    BATCH_SIZE = args.batch_size
+    EPOCHS = args.epochs
+    OPTIMIZE = args.optimize
+    N_TRIALS = args.trials
     
     print(f"Running LSTM model with parameters:")
     print(f"- Sequence length: {SEQUENCE_LENGTH}")
     print(f"- Batch size: {BATCH_SIZE}")
     print(f"- Max epochs: {EPOCHS}")
+    print(f"- Hyperparameter optimization: {'Enabled' if OPTIMIZE else 'Disabled'}")
+    if OPTIMIZE:
+        print(f"- Number of optimization trials: {N_TRIALS}")
     
     # Initialize and run forecaster
     forecaster = LSTMLowResForecaster(
@@ -517,10 +890,12 @@ if __name__ == "__main__":
     )
     
     # Run pipeline
-    metrics = forecaster.run_pipeline()
+    metrics = forecaster.run_pipeline(optimize_hyperparams=OPTIMIZE, n_trials=N_TRIALS)
     
     # Print final results
     print("\nFinal Results:")
     print(f"RMSE: {metrics['rmse']:.2f}")
     print(f"MAE: {metrics['mae']:.2f}")
     print(f"R²: {metrics['r2']:.4f}")
+    if 'r2_scaled' in metrics:
+        print(f"R² (Scaled): {metrics['r2_scaled']:.4f}")

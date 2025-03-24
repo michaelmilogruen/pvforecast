@@ -1,0 +1,9 @@
+lstm_units_1: 170
+lstm_units_2: 26
+lstm_units_3: 20
+dense_units_1: 25
+dense_units_2: 16
+dropout_rate: 0.10777591948556253
+learning_rate: 0.0038214481108336993
+bidirectional: False
+batch_norm: False

@@ -279,100 +279,112 @@ class LSTMLowResImproved:
             y_seq.append(y[i + time_steps])
             
         return np.array(X_seq), np.array(y_seq)
-    
     def create_model_builder(self, input_shape):
         """
-        Create a model builder function for hyperparameter optimization.
+        Create a model builder class for hyperparameter optimization.
         
         Args:
             input_shape: Shape of input data (time_steps, features)
             
         Returns:
-            Function that builds and returns a compiled model
+            Class that builds and returns a compiled model
         """
-        def build_model_for_optimization(
-            lstm_units_1=128,
-            lstm_units_2=64,
-            lstm_units_3=32,
-            dense_units_1=32,
-            dense_units_2=16,
-            dropout_rate=0.3,
-            learning_rate=0.001,
-            bidirectional=True,
-            batch_norm=True
-        ):
-            model = Sequential()
+        # Create a model builder class that can be used with scikit-learn's hyperparameter search
+        class ModelBuilder:
+            def __init__(self,
+                         lstm_units_1=128,
+                         lstm_units_2=64,
+                         lstm_units_3=32,
+                         dense_units_1=32,
+                         dense_units_2=16,
+                         dropout_rate=0.3,
+                         learning_rate=0.001,
+                         bidirectional=True,
+                         batch_norm=True):
+                self.lstm_units_1 = lstm_units_1
+                self.lstm_units_2 = lstm_units_2
+                self.lstm_units_3 = lstm_units_3
+                self.dense_units_1 = dense_units_1
+                self.dense_units_2 = dense_units_2
+                self.dropout_rate = dropout_rate
+                self.learning_rate = learning_rate
+                self.bidirectional = bidirectional
+                self.batch_norm = batch_norm
+                self.input_shape = input_shape
             
-            # First LSTM layer
-            if bidirectional:
-                model.add(Bidirectional(
-                    LSTM(units=lstm_units_1, return_sequences=True),
-                    input_shape=input_shape
-                ))
-            else:
-                model.add(LSTM(
-                    units=lstm_units_1,
-                    return_sequences=True,
-                    input_shape=input_shape
-                ))
-            
-            if batch_norm:
-                model.add(BatchNormalization())
-            
-            model.add(Dropout(dropout_rate))
-            
-            # Second LSTM layer
-            if bidirectional:
-                model.add(Bidirectional(
-                    LSTM(units=lstm_units_2, return_sequences=True)
-                ))
-            else:
-                model.add(LSTM(
-                    units=lstm_units_2,
-                    return_sequences=True
-                ))
-            
-            if batch_norm:
-                model.add(BatchNormalization())
-            
-            model.add(Dropout(dropout_rate))
-            
-            # Last LSTM layer
-            if bidirectional:
-                model.add(Bidirectional(
-                    LSTM(units=lstm_units_3, return_sequences=False)
-                ))
-            else:
-                model.add(LSTM(
-                    units=lstm_units_3,
-                    return_sequences=False
-                ))
-            
-            if batch_norm:
-                model.add(BatchNormalization())
-            
-            model.add(Dropout(dropout_rate))
-            
-            # Dense layers
-            model.add(Dense(dense_units_1, activation='relu'))
-            if batch_norm:
-                model.add(BatchNormalization())
-            model.add(Dropout(dropout_rate))
-            
-            model.add(Dense(dense_units_2, activation='relu'))
-            if batch_norm:
-                model.add(BatchNormalization())
-            
-            # Output layer
-            model.add(Dense(1))
-            
-            # Compile model
-            optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-            model.compile(optimizer=optimizer, loss='mse', metrics=['mae'])
-            
-            return model
+            def __call__(self):
+                model = Sequential()
+                
+                # First LSTM layer
+                if self.bidirectional:
+                    model.add(Bidirectional(
+                        LSTM(units=self.lstm_units_1, return_sequences=True),
+                        input_shape=self.input_shape
+                    ))
+                else:
+                    model.add(LSTM(
+                        units=self.lstm_units_1,
+                        return_sequences=True,
+                        input_shape=self.input_shape
+                    ))
+                
+                if self.batch_norm:
+                    model.add(BatchNormalization())
+                
+                model.add(Dropout(self.dropout_rate))
+                
+                # Second LSTM layer
+                if self.bidirectional:
+                    model.add(Bidirectional(
+                        LSTM(units=self.lstm_units_2, return_sequences=True)
+                    ))
+                else:
+                    model.add(LSTM(
+                        units=self.lstm_units_2,
+                        return_sequences=True
+                    ))
+                
+                if self.batch_norm:
+                    model.add(BatchNormalization())
+                
+                model.add(Dropout(self.dropout_rate))
+                
+                # Last LSTM layer
+                if self.bidirectional:
+                    model.add(Bidirectional(
+                        LSTM(units=self.lstm_units_3, return_sequences=False)
+                    ))
+                else:
+                    model.add(LSTM(
+                        units=self.lstm_units_3,
+                        return_sequences=False
+                    ))
+                
+                if self.batch_norm:
+                    model.add(BatchNormalization())
+                
+                model.add(Dropout(self.dropout_rate))
+                
+                # Dense layers
+                model.add(Dense(self.dense_units_1, activation='relu'))
+                if self.batch_norm:
+                    model.add(BatchNormalization())
+                model.add(Dropout(self.dropout_rate))
+                
+                model.add(Dense(self.dense_units_2, activation='relu'))
+                if self.batch_norm:
+                    model.add(BatchNormalization())
+                
+                # Output layer
+                model.add(Dense(1))
+                
+                # Compile model
+                optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
+                model.compile(optimizer=optimizer, loss='mse', metrics=['mae'])
+                
+                return model
         
-        return build_model_for_optimization
+        return ModelBuilder
     
     def optimize_hyperparameters(self, X_train_seq, y_train_seq, X_val_seq, y_val_seq):
         """
@@ -391,33 +403,91 @@ class LSTMLowResImproved:
         
         # Create model builder
         input_shape = (X_train_seq.shape[1], X_train_seq.shape[2])
-        model_builder = self.create_model_builder(input_shape)
+        model_builder_class = self.create_model_builder(input_shape)
         
-        # Create KerasRegressor
+        # Create a model-building function that will be used by KerasRegressor
+        def build_model():
+            # Use default parameters from self.config
+            builder = model_builder_class(
+                lstm_units_1=self.config['lstm_units'][0],
+                lstm_units_2=self.config['lstm_units'][1],
+                lstm_units_3=self.config['lstm_units'][2],
+                dense_units_1=self.config['dense_units'][0],
+                dense_units_2=self.config['dense_units'][1],
+                dropout_rate=self.config['dropout_rates'][0],
+                learning_rate=self.config['learning_rate'],
+                bidirectional=self.config['bidirectional'],
+                batch_norm=self.config['batch_norm']
+            )
+            return builder()
+        
+        # Create KerasRegressor with the model-building function
         model = KerasRegressor(
-            build_fn=model_builder,
+            model=build_model,
             epochs=20,  # Use fewer epochs for hyperparameter search
             batch_size=self.batch_size,
             verbose=0
         )
         
-        # Define parameter distributions
+        # For each hyperparameter combination, we'll temporarily update self.config
+        # and then the build_model function will use these updated values
         param_distributions = {
-            'lstm_units_1': randint(32, 256),
-            'lstm_units_2': randint(16, 128),
-            'lstm_units_3': randint(8, 64),
-            'dense_units_1': randint(16, 64),
-            'dense_units_2': randint(8, 32),
-            'dropout_rate': uniform(0.1, 0.5),
-            'learning_rate': uniform(0.0001, 0.01),
-            'bidirectional': [True, False],
-            'batch_norm': [True, False]
+            'lstm_units_0': randint(32, 256),  # First LSTM layer units
+            'lstm_units_1': randint(16, 128),  # Second LSTM layer units
+            'lstm_units_2': randint(8, 64),    # Third LSTM layer units
+            'dense_units_0': randint(16, 64),  # First dense layer units
+            'dense_units_1': randint(8, 32),   # Second dense layer units
+            'dropout_rate': uniform(0.1, 0.5), # Dropout rate (same for all layers)
+            'learning_rate': uniform(0.0001, 0.01)
+            # Removed bidirectional and batch_norm from optimization - will use fixed values from self.config
         }
         
-        # Create HalvingRandomSearchCV
+        # Create a custom scorer that updates the model configuration before scoring
+        def custom_scorer(estimator, X, y):
+            # Get the current parameters
+            params = estimator.get_params()
+            
+            # Update the model configuration with the current parameters
+            temp_config = self.config.copy()
+            
+            # Update LSTM units
+            if 'lstm_units_0' in params:
+                temp_config['lstm_units'][0] = params['lstm_units_0']
+            if 'lstm_units_1' in params:
+                temp_config['lstm_units'][1] = params['lstm_units_1']
+            if 'lstm_units_2' in params:
+                temp_config['lstm_units'][2] = params['lstm_units_2']
+                
+            # Update dense units
+            if 'dense_units_0' in params:
+                temp_config['dense_units'][0] = params['dense_units_0']
+            if 'dense_units_1' in params:
+                temp_config['dense_units'][1] = params['dense_units_1']
+                
+            # Update other parameters
+            if 'dropout_rate' in params:
+                temp_config['dropout_rates'] = [params['dropout_rate']] * 5
+            if 'learning_rate' in params:
+                temp_config['learning_rate'] = params['learning_rate']
+            # bidirectional and batch_norm will use fixed values from self.config
+                
+            # Temporarily update the model configuration
+            old_config = self.config
+            self.config = temp_config
+            
+            # Score the model
+            score = estimator.score(X, y)
+            
+            # Restore the original configuration
+            self.config = old_config
+            
+            return score
+        
+        # Create HalvingRandomSearchCV with our custom scorer
         search = HalvingRandomSearchCV(
             estimator=model,
             param_distributions=param_distributions,
+            scoring=custom_scorer,  # Use our custom scorer
             factor=3,  # Reduce candidates by a factor of 3 in each iteration
             resource='epochs',  # Resource to increase with iterations
             max_resources=20,  # Maximum number of epochs
@@ -445,18 +515,17 @@ class LSTMLowResImproved:
         
         # Update config with best parameters
         self.config['lstm_units'] = [
+            best_params['lstm_units_0'],
             best_params['lstm_units_1'],
-            best_params['lstm_units_2'],
-            best_params['lstm_units_3']
+            best_params['lstm_units_2']
         ]
         self.config['dense_units'] = [
-            best_params['dense_units_1'],
-            best_params['dense_units_2']
+            best_params['dense_units_0'],
+            best_params['dense_units_1']
         ]
         self.config['dropout_rates'] = [best_params['dropout_rate']] * 5  # Use same dropout rate for all layers
         self.config['learning_rate'] = best_params['learning_rate']
-        self.config['bidirectional'] = best_params['bidirectional']
-        self.config['batch_norm'] = best_params['batch_norm']
+        # Keep original values for bidirectional and batch_norm (not optimized)
         
         # Save hyperparameter search results
         cv_results_df = pd.DataFrame(search.cv_results_)
@@ -764,15 +833,19 @@ class LSTMLowResImproved:
     
     def run_pipeline(self, optimize_hyperparams=True):
         """
-        Run the full LSTM forecasting pipeline for low-resolution data.
+        Run the complete pipeline for low-resolution data:
+        1. Load and prepare data
+        2. Perform hyperparameter optimization (if requested)
+        3. Train the final model
+        4. Evaluate the model
         
         Args:
             optimize_hyperparams: Whether to perform hyperparameter optimization
             
         Returns:
-            Dictionary of evaluation metrics
+            Dictionary with evaluation metrics
         """
-        print("Running improved LSTM forecasting pipeline for low-resolution (1-hour) data")
+        print("Running hyperparameter optimization for LSTM with low-resolution (1-hour) data")
         
         # Load and prepare data
         df = self.load_and_prepare_data('data/station_data_1h.parquet')
@@ -796,7 +869,7 @@ class LSTMLowResImproved:
         
         print(f"Training sequences shape: {X_train_seq.shape}")
         print(f"Validation sequences shape: {X_val_seq.shape}")
-        print(f"Testing sequences shape: {X_test_seq.shape}")
+        print(f"Test sequences shape: {X_test_seq.shape}")
         
         # Perform hyperparameter optimization if requested
         if optimize_hyperparams:
@@ -811,27 +884,26 @@ class LSTMLowResImproved:
                 for param, value in best_params.items():
                     f.write(f"{param}: {value}\n")
         
-        # Build model with optimized hyperparameters
+        # Build the final model
+        print("\nBuilding and training the final model...")
         input_shape = (X_train_seq.shape[1], X_train_seq.shape[2])
         model = self.build_model(input_shape)
-        model.summary()
         
         # Create callbacks
         callbacks = self.create_callbacks()
         
-        # Train model
-        print("\nTraining model with optimized hyperparameters...")
+        # Train the model
         history = model.fit(
             X_train_seq, y_train_seq,
+            validation_data=(X_val_seq, y_val_seq),
             epochs=self.epochs,
             batch_size=self.batch_size,
-            validation_data=(X_val_seq, y_val_seq),
             callbacks=callbacks,
             verbose=1
         )
         
-        # Evaluate model
-        print("\nEvaluating model...")
+        # Evaluate the model
+        print("\nEvaluating the model on test data...")
         evaluation_results = self.evaluate_model(
             model, X_test_seq, y_test_seq, data['scalers']['target']
         )
@@ -839,9 +911,9 @@ class LSTMLowResImproved:
         # Plot results
         self.plot_results(history, evaluation_results)
         
-        # Save final model
-        model.save(f'models/lstm_lowres_improved/final_model_{self.timestamp}.keras')
-        print(f"Model saved to models/lstm_lowres_improved/final_model_{self.timestamp}.keras")
+        # Save model summary to file
+        with open(f'models/lstm_lowres_improved/model_summary_{self.timestamp}.txt', 'w') as f:
+            model.summary(print_fn=lambda x: f.write(x + '\n'))
         
         return evaluation_results
 
