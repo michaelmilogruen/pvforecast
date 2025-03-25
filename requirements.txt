@@ -25,3 +25,7 @@ pvlib>=0.10.0
 python-snappy>=0.6.1  # Required for parquet compression
 
 tensorflow[and-cuda]>=2.13.0  # For GPU acceleration
+
+optuna # For hyperparameter optimization
+optuna-integration[tfkeras]
+

@@ -59,10 +59,11 @@ class LSTMLowResForecaster:
         self.config = {
             'lstm_units': [64, 32, 16],  # Default 3 LSTM layers
             'dense_units': [16, 8],      # Default 2 dense layers
-            'dropout_rates': [0.2] * 5,  # Default dropout rate for all layers
+            'dropout_rates': [0.2, 0.15, 0.1],  # Adaptive dropout rates for LSTM layers
+            'dense_dropout_rates': [0.1, 0.05],  # Adaptive dropout rates for dense layers
             'learning_rate': 0.001,
             'bidirectional': False,
-            'batch_norm': False
+            'batch_norm': True  # Default to True to allow optimization to try without it
         }
     
     def load_and_prepare_data(self, data_path):
@@ -328,19 +329,28 @@ class LSTMLowResForecaster:
             if num_dense_layers >= 3:
                 # Third dense layer
                 dense_units.append(trial.suggest_int('dense_units_3', 4, 16))
+            # Suggest different dropout rates for each layer
+            lstm_dropout_rates = []
+            for i in range(1, num_lstm_layers + 1):
+                lstm_dropout_rates.append(trial.suggest_float(f'lstm_dropout_rate_{i}', 0.1, 0.5))
             
-            dropout_rate = trial.suggest_float('dropout_rate', 0.1, 0.5)
+            dense_dropout_rates = []
+            for i in range(1, num_dense_layers):  # No dropout after the last dense layer
+                dense_dropout_rates.append(trial.suggest_float(f'dense_dropout_rate_{i}', 0.05, 0.3))
+                
             learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)
             bidirectional = trial.suggest_categorical('bidirectional', [True, False])
-            batch_norm = trial.suggest_categorical('batch_norm', [True, False])
+            batch_norm = trial.suggest_categorical('batch_norm', [True])
             
             # Update config with suggested hyperparameters
-            dropout_rates = [dropout_rate] * (num_lstm_layers + num_dense_layers)  # Same dropout rate for all layers
+            dropout_rates = lstm_dropout_rates
+            dense_dropout_rates = dense_dropout_rates
         else:
             # Use existing configuration
             lstm_units = self.config['lstm_units']
             dense_units = self.config['dense_units']
             dropout_rates = self.config['dropout_rates']
+            dense_dropout_rates = self.config['dense_dropout_rates']
             learning_rate = self.config['learning_rate']
             bidirectional = self.config['bidirectional']
             batch_norm = self.config['batch_norm']
@@ -381,7 +391,7 @@ class LSTMLowResForecaster:
             if batch_norm:
                 model.add(BatchNormalization())
             
-            model.add(Dropout(dropout_rates[min(i, len(dropout_rates)-1)]))
+            model.add(Dropout(dropout_rates[i] if i < len(dropout_rates) else dropout_rates[-1]))  # Use appropriate LSTM layer dropout rate
         
         # Dense layers
         for i in range(num_dense_layers):
@@ -391,7 +401,7 @@ class LSTMLowResForecaster:
                 model.add(BatchNormalization())
             
             if i < num_dense_layers - 1:  # No dropout after the last dense layer
-                model.add(Dropout(dropout_rates[min(num_lstm_layers + i, len(dropout_rates)-1)]))
+                model.add(Dropout(dense_dropout_rates[i] if i < len(dense_dropout_rates) else dense_dropout_rates[-1]))  # Use appropriate dense layer dropout rate
         
         # Output layer
         model.add(Dense(1))
@@ -545,7 +555,19 @@ class LSTMLowResForecaster:
             if f'dense_units_{i}' in best_params:
                 dense_units.append(best_params[f'dense_units_{i}'])
         self.config['dense_units'] = dense_units
-        self.config['dropout_rates'] = [best_params['dropout_rate']] * 5  # Use same dropout rate for all layers
+        # Extract adaptive dropout rates for LSTM and dense layers
+        lstm_dropout_rates = []
+        for i in range(1, num_lstm_layers + 1):
+            if f'lstm_dropout_rate_{i}' in best_params:
+                lstm_dropout_rates.append(best_params[f'lstm_dropout_rate_{i}'])
+        self.config['dropout_rates'] = lstm_dropout_rates
+        
+        # Extract dense dropout rates
+        dense_dropout_rates = []
+        for i in range(1, num_dense_layers):  # No dropout after last dense layer
+            if f'dense_dropout_rate_{i}' in best_params:
+                dense_dropout_rates.append(best_params[f'dense_dropout_rate_{i}'])
+        self.config['dense_dropout_rates'] = dense_dropout_rates
         self.config['learning_rate'] = best_params['learning_rate']
         self.config['bidirectional'] = best_params['bidirectional']
         self.config['batch_norm'] = best_params['batch_norm']
@@ -586,9 +608,22 @@ class LSTMLowResForecaster:
         plt.tight_layout()
         plt.savefig(f'results/lstm_lowres_optuna/parallel_coordinate_{self.timestamp}.png')
         
-        # Plot slice plots for key hyperparameters
-        key_params = ['num_lstm_layers', 'num_dense_layers', 'learning_rate', 'dropout_rate']
+        # Plot slice plots for key hyperparameters that exist in the study
+        key_params = ['num_lstm_layers', 'num_dense_layers', 'learning_rate']
+        # Get all parameter names from the study
+        study_params = list(study.best_params.keys())
+        
+        # Plot slice plots for primary parameters
         for param in key_params:
+            if param in study_params:
+                plt.figure(figsize=(10, 6))
+                optuna.visualization.matplotlib.plot_slice(study, params=[param])
+                plt.tight_layout()
+                plt.savefig(f'results/lstm_lowres_optuna/slice_{param}_{self.timestamp}.png')
+        
+        # Plot slice plots for dropout rates if they exist
+        dropout_params = [p for p in study_params if 'dropout_rate' in p]
+        for param in dropout_params:
             plt.figure(figsize=(10, 6))
             optuna.visualization.matplotlib.plot_slice(study, params=[param])
             plt.tight_layout()
@@ -618,10 +653,21 @@ class LSTMLowResForecaster:
         mae_scaled = mean_absolute_error(y_test, y_pred)
         r2_scaled = r2_score(y_test, y_pred)
         
+        # Calculate MAPE (Mean Absolute Percentage Error) for scaled data
+        # Avoid division by zero or very small numbers
+        epsilon = 1e-10  # Small constant to avoid division by zero
+        mape_scaled = np.mean(np.abs((y_test - y_pred) / (y_test + epsilon))) * 100
+        
+        # Calculate SMAPE (Symmetric Mean Absolute Percentage Error) for scaled data
+        # This metric is symmetric and handles zero values better
+        smape_scaled = np.mean(2.0 * np.abs(y_pred - y_test) / (np.abs(y_pred) + np.abs(y_test) + epsilon)) * 100
+        
         print("\nModel Evaluation (Scaled):")
         print(f"Mean Squared Error (MSE): {mse_scaled:.4f}")
         print(f"Root Mean Squared Error (RMSE): {rmse_scaled:.4f}")
         print(f"Mean Absolute Error (MAE): {mae_scaled:.4f}")
+        print(f"Mean Absolute Percentage Error (MAPE): {mape_scaled:.2f}%")
+        print(f"Symmetric Mean Absolute Percentage Error (SMAPE): {smape_scaled:.2f}%")
         print(f"R² Score: {r2_scaled:.4f}")
         
         # If target scaler is provided, inverse transform predictions and true values
@@ -635,20 +681,31 @@ class LSTMLowResForecaster:
             mae = mean_absolute_error(y_test_inv, y_pred_inv)
             r2 = r2_score(y_test_inv, y_pred_inv)
             
+            # Calculate MAPE and SMAPE on original scale
+            epsilon = 1e-10  # Small constant to avoid division by zero
+            mape = np.mean(np.abs((y_test_inv - y_pred_inv) / (y_test_inv + epsilon))) * 100
+            smape = np.mean(2.0 * np.abs(y_pred_inv - y_test_inv) / (np.abs(y_pred_inv) + np.abs(y_test_inv) + epsilon)) * 100
+            
             print("\nModel Evaluation (Original Scale):")
             print(f"Mean Squared Error (MSE): {mse:.4f}")
             print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
             print(f"Mean Absolute Error (MAE): {mae:.4f}")
+            print(f"Mean Absolute Percentage Error (MAPE): {mape:.2f}%")
+            print(f"Symmetric Mean Absolute Percentage Error (SMAPE): {smape:.2f}%")
             print(f"R² Score: {r2:.4f}")
             
             return {
                 'mse': mse,
                 'rmse': rmse,
                 'mae': mae,
+                'mape': mape,
+                'smape': smape,
                 'r2': r2,
                 'mse_scaled': mse_scaled,
                 'rmse_scaled': rmse_scaled,
                 'mae_scaled': mae_scaled,
+                'mape_scaled': mape_scaled,
+                'smape_scaled': smape_scaled,
                 'r2_scaled': r2_scaled,
                 'y_test_inv': y_test_inv,
                 'y_pred_inv': y_pred_inv,
@@ -661,6 +718,8 @@ class LSTMLowResForecaster:
                 'mse': mse_scaled,
                 'rmse': rmse_scaled,
                 'mae': mae_scaled,
+                'mape': mape_scaled,
+                'smape': smape_scaled,
                 'r2': r2_scaled,
                 'y_test': y_test,
                 'y_pred': y_pred
@@ -896,6 +955,8 @@ if __name__ == "__main__":
     print("\nFinal Results:")
     print(f"RMSE: {metrics['rmse']:.2f}")
     print(f"MAE: {metrics['mae']:.2f}")
+    print(f"MAPE: {metrics['mape']:.2f}%")
+    print(f"SMAPE: {metrics['smape']:.2f}%")
     print(f"R²: {metrics['r2']:.4f}")
     if 'r2_scaled' in metrics:
         print(f"R² (Scaled): {metrics['r2_scaled']:.4f}")
