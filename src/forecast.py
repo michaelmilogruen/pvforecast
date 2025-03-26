@@ -16,6 +16,7 @@ import requests
 import json
 import os
 import csv
+import glob
 from datetime import datetime, timedelta
 from tensorflow.keras.models import load_model
 import matplotlib.pyplot as plt
@@ -31,20 +32,15 @@ class PVForecaster:
     consistent with the training process in process_training_data.py.
     """
     
-    def __init__(self, model_path='models/power_forecast_model.keras', 
-                 feature_set='station', config_id=2, sequence_length=96):
+    def __init__(self, feature_set='station', sequence_length=24):
         """
         Initialize the PV Forecaster with model and configuration.
         
         Args:
-            model_path (str): Path to the trained LSTM model
             feature_set (str): Feature set to use ('inca', 'station', or 'combined')
-            config_id (int): Configuration ID
             sequence_length (int): Sequence length for LSTM input
         """
-        self.model_path = model_path
         self.feature_set = feature_set
-        self.config_id = config_id
         self.sequence_length = sequence_length
         
         # Location parameters for Leoben
@@ -60,22 +56,99 @@ class PVForecaster:
         self.feature_sets = self._define_feature_sets()
         
     def _load_model_and_scalers(self):
-        """Load the trained model and necessary scalers"""
+        """Load the trained model and necessary scalers from INFERENCE directory"""
         try:
-            # Try to load the model with the feature set and config ID
-            model_path = f"models/lstm/{self.feature_set}_config_{self.config_id}_model.keras"
-            if os.path.exists(model_path):
+            # Find the most recent model file
+            model_files = glob.glob('models/INFERENCE/final_model_*.keras')
+            if not model_files:
+                model_files = glob.glob('models/INFERENCE/model_*.keras')
+            
+            if model_files:
+                # Sort to get most recent (based on filename)
+                model_files.sort(reverse=True)
+                model_path = model_files[0]
                 self.model = load_model(model_path)
                 print(f"Loaded model from {model_path}")
+                
+                # Extract timestamp from model filename to find matching scalers
+                if 'final_model_' in model_path:
+                    timestamp = model_path.split('final_model_')[1].split('.keras')[0]
+                else:
+                    timestamp = model_path.split('model_')[1].split('.keras')[0]
+                
+                print(f"Using model timestamp: {timestamp}")
+                
+                # Load matching scalers
+                minmax_path = f'models/INFERENCE/minmax_scaler_{timestamp}.pkl'
+                standard_path = f'models/INFERENCE/standard_scaler_{timestamp}.pkl'
+                target_path = f'models/INFERENCE/target_scaler_{timestamp}.pkl'
+                robust_path = f'models/INFERENCE/robust_scaler_{timestamp}.pkl'
+                
+                # Load scalers if files exist
+                if os.path.exists(minmax_path):
+                    self.minmax_scaler = joblib.load(minmax_path)
+                    print(f"Loaded MinMax scaler from: {minmax_path}")
+                else:
+                    # Try to find any minmax scaler
+                    minmax_files = glob.glob('models/INFERENCE/minmax_scaler_*.pkl')
+                    if minmax_files:
+                        minmax_files.sort(reverse=True)
+                        self.minmax_scaler = joblib.load(minmax_files[0])
+                        print(f"Loaded MinMax scaler from: {minmax_files[0]}")
+                    else:
+                        self.minmax_scaler = joblib.load('models/minmax_scaler.pkl')
+                        print("Loaded MinMax scaler from default path")
+                
+                if os.path.exists(standard_path):
+                    self.standard_scaler = joblib.load(standard_path)
+                    print(f"Loaded Standard scaler from: {standard_path}")
+                else:
+                    # Try to find any standard scaler
+                    standard_files = glob.glob('models/INFERENCE/standard_scaler_*.pkl')
+                    if standard_files:
+                        standard_files.sort(reverse=True)
+                        self.standard_scaler = joblib.load(standard_files[0])
+                        print(f"Loaded Standard scaler from: {standard_files[0]}")
+                    else:
+                        self.standard_scaler = joblib.load('models/standard_scaler.pkl')
+                        print("Loaded Standard scaler from default path")
+                
+                if os.path.exists(target_path):
+                    self.target_scaler = joblib.load(target_path)
+                    print(f"Loaded Target scaler from: {target_path}")
+                else:
+                    # Try to find any target scaler
+                    target_files = glob.glob('models/INFERENCE/target_scaler_*.pkl')
+                    if target_files:
+                        target_files.sort(reverse=True)
+                        self.target_scaler = joblib.load(target_files[0])
+                        print(f"Loaded Target scaler from: {target_files[0]}")
+                    else:
+                        self.target_scaler = joblib.load('models/target_scaler.pkl')
+                        print("Loaded Target scaler from default path")
+                
+                # Optionally load robust scaler if it exists
+                if os.path.exists(robust_path):
+                    self.robust_scaler = joblib.load(robust_path)
+                    print(f"Loaded Robust scaler from: {robust_path}")
+                else:
+                    # Try to find any robust scaler
+                    robust_files = glob.glob('models/INFERENCE/robust_scaler_*.pkl')
+                    if robust_files:
+                        robust_files.sort(reverse=True)
+                        self.robust_scaler = joblib.load(robust_files[0])
+                        print(f"Loaded Robust scaler from: {robust_files[0]}")
             else:
-                # Fall back to the default model path
-                self.model = load_model(self.model_path)
-                print(f"Loaded model from {self.model_path}")
-            
-            # Load the scalers
-            self.minmax_scaler = joblib.load('models/minmax_scaler.pkl')
-            self.standard_scaler = joblib.load('models/standard_scaler.pkl')
-            self.target_scaler = joblib.load('models/target_scaler.pkl')
+                # Fall back to default paths if no model files found in INFERENCE directory
+                print("No model files found in INFERENCE directory, falling back to defaults.")
+                self.model = load_model('models/power_forecast_model.keras')
+                print("Loaded model from default path")
+                
+                # Load default scalers
+                self.minmax_scaler = joblib.load('models/minmax_scaler.pkl')
+                self.standard_scaler = joblib.load('models/standard_scaler.pkl')
+                self.target_scaler = joblib.load('models/target_scaler.pkl')
+                print("Loaded scalers from default paths")
             
             print("Model and scalers loaded successfully.")
         except Exception as e:
@@ -97,10 +170,10 @@ class PVForecaster:
                 'isNight'
             ],
             'station': [
-                'Station_GlobalRadiation [W m-2]',
-                'Station_Temperature [degree_Celsius]',
-                'Station_WindSpeed [m s-1]',
-                'Station_ClearSkyIndex',
+                'GlobalRadiation [W m-2]',
+                'Temperature [degree_Celsius]',
+                'WindSpeed [m s-1]',
+                'ClearSkyIndex',
                 'hour_sin',
                 'hour_cos',
                 'day_cos',
@@ -196,6 +269,17 @@ class PVForecaster:
         # Set timestamp as index
         new_data.set_index('timestamp', inplace=True)
         
+        # Create essential column mappings immediately to prevent KeyErrors later
+        if 'GlobalRadiation [W m-2]' not in new_data.columns:
+            new_data['GlobalRadiation [W m-2]'] = new_data['poa_global']
+            print("Created GlobalRadiation [W m-2] column from poa_global in process_weather_data")
+            
+        if 'Temperature [degree_Celsius]' not in new_data.columns:
+            new_data['Temperature [degree_Celsius]'] = new_data['temp_air']
+            
+        if 'WindSpeed [m s-1]' not in new_data.columns:
+            new_data['WindSpeed [m s-1]'] = new_data['wind_speed']
+        
         return new_data
     
     def add_derived_features(self, df):
@@ -208,6 +292,21 @@ class PVForecaster:
         Returns:
             DataFrame with added time-based features
         """
+        # Ensure all required columns exist before calculations begin
+        print("Adding essential feature mappings before derived calculations")
+        if 'GlobalRadiation [W m-2]' not in df.columns and 'poa_global' in df.columns:
+            df['GlobalRadiation [W m-2]'] = df['poa_global']
+            print("Created GlobalRadiation [W m-2] from poa_global")
+            
+        if 'INCA_GlobalRadiation [W m-2]' not in df.columns and 'poa_global' in df.columns:
+            df['INCA_GlobalRadiation [W m-2]'] = df['poa_global']
+            
+        if 'Combined_GlobalRadiation [W m-2]' not in df.columns and 'poa_global' in df.columns:
+            df['Combined_GlobalRadiation [W m-2]'] = df['poa_global']
+            
+        # Print available columns for debugging
+        print("Columns before derived calculations:", df.columns.tolist())
+            
         # Calculate hour with minute resolution (e.g., 15:15 becomes 15.25)
         df['hour'] = df.index.hour + df.index.minute / 60
         df['day_of_year'] = df.index.dayofyear
@@ -226,126 +325,94 @@ class PVForecaster:
         return df
     
     def calculate_clear_sky(self, df):
-        """
-        Calculate clear sky irradiance values using pvlib.
-        This is similar to the approach in process_training_data.py.
-        
-        Args:
-            df: DataFrame with datetime index
+            """
+            Calculate ClearSkyIndex and append it to the given dataframe.
             
-        Returns:
-            DataFrame with added clear sky features
-        """
-        # Define location
-        location = Location(self.latitude, self.longitude, self.tz, self.altitude)
-        
-        # Get solar position
-        solar_position = location.get_solarposition(df.index)
-        
-        # Calculate pressure based on altitude and convert from hPa to Pa
-        pressure = pvlib.atmosphere.alt2pres(self.altitude) * 100
-        
-        # Approximate precipitable water (in cm)
-        precipitable_water = 1.0  # Default value as a simple approximation
-        
-        # Calculate apparent elevation and ensure it's not negative
-        apparent_elevation = 90 - solar_position['apparent_zenith']
-        apparent_elevation = apparent_elevation.clip(lower=0)
-        
-        # Calculate clear sky irradiance using simplified Solis model
-        clear_sky = simplified_solis(
-            apparent_elevation=apparent_elevation,
-            aod700=0.1,  # Default value for aerosol optical depth
-            precipitable_water=precipitable_water,
-            pressure=pressure
-        )
-        
-        # Set irradiance components to 0 for nighttime (elevation <= 0)
-        night_mask = (apparent_elevation <= 0)
-        clear_sky['ghi'][night_mask] = 0
-        clear_sky['dni'][night_mask] = 0
-        clear_sky['dhi'][night_mask] = 0
-        
-        # Add isNight feature (1 for night, 0 for day)
-        df['isNight'] = night_mask.astype(int)
-        
-        # Add clear sky values to dataframe with appropriate prefixes based on feature set
-        prefix = self.feature_set.upper()
-        print(f"Feature set: {self.feature_set}, Prefix: {prefix}")
-        
-        if self.feature_set == 'combined':
-            # For combined, we'll add both INCA and Station prefixes
-            df['INCA_ClearSkyGHI'] = clear_sky['ghi']
-            df['Station_ClearSkyGHI'] = clear_sky['ghi']
-        else:
-            column_name = f'{prefix}_ClearSkyGHI'
-            print(f"Adding column: {column_name}")
-            df[column_name] = clear_sky['ghi']
+            Args:
+                df: DataFrame with datetime index
+                
+            Returns:
+                DataFrame with added ClearSkyIndex
+            """
+            # Define location
+            location = Location(self.latitude, self.longitude, self.tz, self.altitude)
             
-            # For station feature set, explicitly add Station_ClearSkyGHI
-            if self.feature_set == 'station':
-                print("Explicitly adding Station_ClearSkyGHI")
-                df['Station_ClearSkyGHI'] = clear_sky['ghi']
-        
-        # Map API data to the appropriate feature names based on feature set
-        if self.feature_set == 'inca':
-            df['INCA_GlobalRadiation [W m-2]'] = df['poa_global']
-            df['INCA_Temperature [degree_Celsius]'] = df['temp_air']
-            df['INCA_WindSpeed [m s-1]'] = df['wind_speed']
+            # Get solar position
+            solar_position = location.get_solarposition(df.index)
             
-            # Calculate clear sky index
-            df['INCA_ClearSkyIndex'] = np.where(
-                df['INCA_ClearSkyGHI'] > 10,
-                df['INCA_GlobalRadiation [W m-2]'] / df['INCA_ClearSkyGHI'],
-                0
+            # Calculate pressure based on altitude and convert from hPa to Pa
+            pressure = pvlib.atmosphere.alt2pres(self.altitude) * 100
+            
+            # Approximate precipitable water (in cm)
+            precipitable_water = 1.0  # Default value as a simple approximation
+            
+            # Calculate apparent elevation and ensure it's not negative
+            apparent_elevation = 90 - solar_position['apparent_zenith']
+            apparent_elevation = apparent_elevation.clip(lower=0)
+            
+            # Calculate clear sky irradiance using simplified Solis model
+            clear_sky = simplified_solis(
+                apparent_elevation=apparent_elevation,
+                aod700=0.1,  # Default value for aerosol optical depth
+                precipitable_water=precipitable_water,
+                pressure=pressure
             )
-            df['INCA_ClearSkyIndex'] = df['INCA_ClearSkyIndex'].clip(0, 1.5)
             
-        elif self.feature_set == 'station':
-            df['Station_GlobalRadiation [W m-2]'] = df['poa_global']
-            df['Station_Temperature [degree_Celsius]'] = df['temp_air']
-            df['Station_WindSpeed [m s-1]'] = df['wind_speed']
+            # Set irradiance components to 0 for nighttime (elevation <= 0)
+            night_mask = (apparent_elevation <= 0)
+            clear_sky.loc[night_mask, 'ghi'] = 0
             
-            # Calculate clear sky index
-            df['Station_ClearSkyIndex'] = np.where(
-                df['Station_ClearSkyGHI'] > 10,
-                df['Station_GlobalRadiation [W m-2]'] / df['Station_ClearSkyGHI'],
-                0
-            )
-            df['Station_ClearSkyIndex'] = df['Station_ClearSkyIndex'].clip(0, 1.5)
+            # Set other irradiance components to 0 for nighttime if they exist
+            if 'dni' in clear_sky.columns:
+                clear_sky.loc[night_mask, 'dni'] = 0
+            if 'dhi' in clear_sky.columns:
+                clear_sky.loc[night_mask, 'dhi'] = 0
             
-        elif self.feature_set == 'combined':
-            # For combined, we'll create both INCA and Station features, then average them
-            df['INCA_GlobalRadiation [W m-2]'] = df['poa_global']
-            df['INCA_Temperature [degree_Celsius]'] = df['temp_air']
-            df['INCA_WindSpeed [m s-1]'] = df['wind_speed']
+            # Add isNight feature (1 for night, 0 for day)
+            df['isNight'] = night_mask.astype(int)
             
-            df['Station_GlobalRadiation [W m-2]'] = df['poa_global']
-            df['Station_Temperature [degree_Celsius]'] = df['temp_air']
-            df['Station_WindSpeed [m s-1]'] = df['wind_speed']
-            
-            # Calculate clear sky indices
-            df['INCA_ClearSkyIndex'] = np.where(
-                df['INCA_ClearSkyGHI'] > 10,
-                df['INCA_GlobalRadiation [W m-2]'] / df['INCA_ClearSkyGHI'],
-                0
-            )
-            df['INCA_ClearSkyIndex'] = df['INCA_ClearSkyIndex'].clip(0, 1.5)
-            
-            df['Station_ClearSkyIndex'] = np.where(
-                df['Station_ClearSkyGHI'] > 10,
-                df['Station_GlobalRadiation [W m-2]'] / df['Station_ClearSkyGHI'],
-                0
-            )
-            df['Station_ClearSkyIndex'] = df['Station_ClearSkyIndex'].clip(0, 1.5)
-            
-            # Create combined features
-            df['Combined_GlobalRadiation [W m-2]'] = df[['INCA_GlobalRadiation [W m-2]', 'Station_GlobalRadiation [W m-2]']].mean(axis=1)
-            df['Combined_Temperature [degree_Celsius]'] = df[['INCA_Temperature [degree_Celsius]', 'Station_Temperature [degree_Celsius]']].mean(axis=1)
-            df['Combined_WindSpeed [m s-1]'] = df[['INCA_WindSpeed [m s-1]', 'Station_WindSpeed [m s-1]']].mean(axis=1)
-            df['Combined_ClearSkyIndex'] = df[['INCA_ClearSkyIndex', 'Station_ClearSkyIndex']].mean(axis=1)
-        
-        return df
+            # Calculate ClearSkyIndex based on feature set
+            if self.feature_set == 'inca':
+                radiation_col = 'INCA_GlobalRadiation [W m-2]'
+                df['INCA_ClearSkyIndex'] = np.where(
+                    clear_sky['ghi'] > 10,
+                    df[radiation_col] / clear_sky['ghi'],
+                    0
+                )
+                df['INCA_ClearSkyIndex'] = df['INCA_ClearSkyIndex'].clip(0, 1.5)
+                
+            elif self.feature_set == 'station':
+                radiation_col = 'GlobalRadiation [W m-2]'
+                df['ClearSkyIndex'] = np.where(
+                    clear_sky['ghi'] > 10,
+                    df[radiation_col] / clear_sky['ghi'],
+                    0
+                )
+                df['ClearSkyIndex'] = df['ClearSkyIndex'].clip(0, 1.5)
+                
+            else:  # combined
+                # INCA
+                inca_rad_col = 'INCA_GlobalRadiation [W m-2]'
+                df['INCA_ClearSkyIndex'] = np.where(
+                    clear_sky['ghi'] > 10,
+                    df[inca_rad_col] / clear_sky['ghi'],
+                    0
+                )
+                df['INCA_ClearSkyIndex'] = df['INCA_ClearSkyIndex'].clip(0, 1.5)
+                
+                # Station
+                rad_col = 'GlobalRadiation [W m-2]'
+                df['ClearSkyIndex'] = np.where(
+                    clear_sky['ghi'] > 10,
+                    df[rad_col] / clear_sky['ghi'],
+                    0
+                )
+                df['ClearSkyIndex'] = df['ClearSkyIndex'].clip(0, 1.5)
+                
+                # Combined
+                df['Combined_ClearSkyIndex'] = df[['INCA_ClearSkyIndex', 'ClearSkyIndex']].mean(axis=1)
+                
+            return df
     
     def normalize_data(self, df):
         """
@@ -369,8 +436,8 @@ class PVForecaster:
             'INCA_ClearSkyDHI',  # Added missing feature
             'INCA_ClearSkyDNI',  # Added missing feature
             # Station Radiation features
-            'Station_GlobalRadiation [W m-2]',
-            'Station_ClearSkyGHI',
+            'GlobalRadiation [W m-2]',
+            'ClearSkyGHI',
             # Combined Radiation features
             'Combined_GlobalRadiation [W m-2]',
         ]
@@ -381,9 +448,9 @@ class PVForecaster:
             'INCA_WindSpeed [m s-1]',
             'INCA_ClearSkyIndex',
             # Station weather measurements
-            'Station_Temperature [degree_Celsius]',
-            'Station_WindSpeed [m s-1]',
-            'Station_ClearSkyIndex',
+            'Temperature [degree_Celsius]',
+            'WindSpeed [m s-1]',
+            'ClearSkyIndex',
             # Combined measurements
             'Combined_Temperature [degree_Celsius]',
             'Combined_WindSpeed [m s-1]',
@@ -424,6 +491,13 @@ class PVForecaster:
         # Process the weather data
         df = self.process_weather_data(weather_data)
         
+        # Verify poa_global exists in the processed data
+        if 'poa_global' not in df.columns:
+            raise KeyError("'poa_global' column is missing in the processed weather data. Check the API response structure.")
+        
+        # Print columns for debugging
+        print("Data columns after processing:", df.columns.tolist())
+        
         # Add derived features
         df = self.add_derived_features(df)
         
@@ -434,40 +508,55 @@ class PVForecaster:
         # Common time features are already added in add_derived_features
         
         # Station features
-        if 'Station_GlobalRadiation [W m-2]' not in df.columns:
-            df['Station_GlobalRadiation [W m-2]'] = df['poa_global']
-        if 'Station_Temperature [degree_Celsius]' not in df.columns:
-            df['Station_Temperature [degree_Celsius]'] = df['temp_air']
-        if 'Station_WindSpeed [m s-1]' not in df.columns:
-            df['Station_WindSpeed [m s-1]'] = df['wind_speed']
-        if 'Station_ClearSkyIndex' not in df.columns:
-            df['Station_ClearSkyIndex'] = df['total_cloud_cover']
+        try:
+            if 'GlobalRadiation [W m-2]' not in df.columns:
+                df['GlobalRadiation [W m-2]'] = df['poa_global']
+            if 'Temperature [degree_Celsius]' not in df.columns:
+                df['Temperature [degree_Celsius]'] = df['temp_air']
+            if 'WindSpeed [m s-1]' not in df.columns:
+                df['WindSpeed [m s-1]'] = df['wind_speed']
+            if 'ClearSkyIndex' not in df.columns:
+                df['ClearSkyIndex'] = df['total_cloud_cover']
+        except KeyError as e:
+            print(f"Error creating station features: {e}")
+            print(f"Available columns: {df.columns.tolist()}")
+            raise KeyError(f"Cannot create necessary feature mappings. Missing column: {e}")
         
         # INCA features
-        if 'INCA_GlobalRadiation [W m-2]' not in df.columns:
-            df['INCA_GlobalRadiation [W m-2]'] = df['poa_global']
-        if 'INCA_Temperature [degree_Celsius]' not in df.columns:
-            df['INCA_Temperature [degree_Celsius]'] = df['temp_air']
-        if 'INCA_WindSpeed [m s-1]' not in df.columns:
-            df['INCA_WindSpeed [m s-1]'] = df['wind_speed']
-        if 'INCA_ClearSkyIndex' not in df.columns:
-            df['INCA_ClearSkyIndex'] = df['total_cloud_cover']
-        if 'INCA_ClearSkyDHI' not in df.columns:
-            df['INCA_ClearSkyDHI'] = 0.0
-        if 'INCA_ClearSkyDNI' not in df.columns:
-            df['INCA_ClearSkyDNI'] = 0.0
-        if 'INCA_ClearSkyGHI' not in df.columns:
-            df['INCA_ClearSkyGHI'] = 0.0
+        try:
+            if 'INCA_GlobalRadiation [W m-2]' not in df.columns:
+                df['INCA_GlobalRadiation [W m-2]'] = df['poa_global']
+            if 'INCA_Temperature [degree_Celsius]' not in df.columns:
+                df['INCA_Temperature [degree_Celsius]'] = df['temp_air']
+            if 'INCA_WindSpeed [m s-1]' not in df.columns:
+                df['INCA_WindSpeed [m s-1]'] = df['wind_speed']
+            if 'INCA_ClearSkyIndex' not in df.columns:
+                df['INCA_ClearSkyIndex'] = df['total_cloud_cover']
+            if 'INCA_ClearSkyDHI' not in df.columns:
+                df['INCA_ClearSkyDHI'] = 0.0
+            if 'INCA_ClearSkyDNI' not in df.columns:
+                df['INCA_ClearSkyDNI'] = 0.0
+            if 'INCA_ClearSkyGHI' not in df.columns:
+                df['INCA_ClearSkyGHI'] = 0.0
+        except KeyError as e:
+            print(f"Error creating INCA features: {e}")
+            print(f"Available columns: {df.columns.tolist()}")
+            raise KeyError(f"Cannot create necessary INCA feature mappings. Missing column: {e}")
         
         # Combined features
-        if 'Combined_GlobalRadiation [W m-2]' not in df.columns:
-            df['Combined_GlobalRadiation [W m-2]'] = df['poa_global']
-        if 'Combined_Temperature [degree_Celsius]' not in df.columns:
-            df['Combined_Temperature [degree_Celsius]'] = df['temp_air']
-        if 'Combined_WindSpeed [m s-1]' not in df.columns:
-            df['Combined_WindSpeed [m s-1]'] = df['wind_speed']
-        if 'Combined_ClearSkyIndex' not in df.columns:
-            df['Combined_ClearSkyIndex'] = df['total_cloud_cover']
+        try:
+            if 'Combined_GlobalRadiation [W m-2]' not in df.columns:
+                df['Combined_GlobalRadiation [W m-2]'] = df['poa_global']
+            if 'Combined_Temperature [degree_Celsius]' not in df.columns:
+                df['Combined_Temperature [degree_Celsius]'] = df['temp_air']
+            if 'Combined_WindSpeed [m s-1]' not in df.columns:
+                df['Combined_WindSpeed [m s-1]'] = df['wind_speed']
+            if 'Combined_ClearSkyIndex' not in df.columns:
+                df['Combined_ClearSkyIndex'] = df['total_cloud_cover']
+        except KeyError as e:
+            print(f"Error creating Combined features: {e}")
+            print(f"Available columns: {df.columns.tolist()}")
+            raise KeyError(f"Cannot create necessary Combined feature mappings. Missing column: {e}")
         
         # Normalize the data
         df = self.normalize_data(df)
@@ -516,13 +605,24 @@ class PVForecaster:
             # Prepare data for prediction
             df, X = self.prepare_data_for_prediction(weather_data, hours)
             
+            # Print available columns for debugging
+            print("Available columns for prediction:", df.columns.tolist())
+            
+            # Ensure required columns exist
+            required_columns = ['poa_global', 'temp_air', 'wind_speed', 'total_cloud_cover',
+                               'hour_sin', 'hour_cos', 'day_sin', 'day_cos', 'isNight']
+            
+            for col in required_columns:
+                if col not in df.columns:
+                    raise KeyError(f"Required column '{col}' not found in processed data. Check the API response structure.")
+            
             # Create a new DataFrame with the same feature names as used during training
             # Map the inference feature names to the training feature names
             training_data = pd.DataFrame({
-                'Station_GlobalRadiation [W m-2]': df['poa_global'],
-                'Station_Temperature [degree_Celsius]': df['temp_air'],
-                'Station_WindSpeed [m s-1]': df['wind_speed'],
-                'Station_ClearSkyIndex': df['total_cloud_cover'],  # Use cloud cover as ClearSkyIndex
+                'GlobalRadiation [W m-2]': df['poa_global'],
+                'Temperature [degree_Celsius]': df['temp_air'],
+                'WindSpeed [m s-1]': df['wind_speed'],
+                'ClearSkyIndex': df['total_cloud_cover'],  # Use cloud cover as ClearSkyIndex
                 'hour_sin': df['hour_sin'],
                 'hour_cos': df['hour_cos'],
                 'day_sin': df['day_sin'],
@@ -532,10 +632,10 @@ class PVForecaster:
             
             # Define the features in the same order as used during training
             training_features = [
-                'Station_GlobalRadiation [W m-2]',
-                'Station_Temperature [degree_Celsius]',
-                'Station_WindSpeed [m s-1]',
-                'Station_ClearSkyIndex',
+                'GlobalRadiation [W m-2]',
+                'Temperature [degree_Celsius]',
+                'WindSpeed [m s-1]',
+                'ClearSkyIndex',
                 'hour_sin',
                 'hour_cos',
                 'day_sin',
@@ -600,7 +700,7 @@ class PVForecaster:
         if self.feature_set == 'inca':
             irradiance_col = 'INCA_GlobalRadiation [W m-2]'
         elif self.feature_set == 'station':
-            irradiance_col = 'Station_GlobalRadiation [W m-2]'
+            irradiance_col = 'GlobalRadiation [W m-2]'
         else:
             irradiance_col = 'Combined_GlobalRadiation [W m-2]'
             
@@ -646,7 +746,7 @@ class PVForecaster:
         lines2, labels2 = ax2.get_legend_handles_labels()
         ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
         
-        plt.title(f'PV Power Forecast ({self.feature_set.capitalize()} Config {self.config_id})')
+        plt.title(f'PV Power Forecast ({self.feature_set.capitalize()})')
         plt.grid(True, alpha=0.3)
         
         # Format x-axis to show dates nicely
@@ -710,7 +810,7 @@ def main():
     Main function to run the forecaster as a standalone script.
     """
     # Create forecaster with default settings
-    forecaster = PVForecaster(feature_set='station', config_id=2)
+    forecaster = PVForecaster(feature_set='station', sequence_length=24)
     
     # Make predictions
     try:
@@ -728,7 +828,7 @@ def main():
         # Print summary
         print("\nForecast Summary:")
         print(f"Feature set: {forecaster.feature_set}")
-        print(f"Config ID: {forecaster.config_id}")
+        print(f"Sequence length: {forecaster.sequence_length}")
         print(f"Forecast period: {pred_df['timestamp'].min()} to {pred_df['timestamp'].max()}")
         print(f"Maximum predicted power: {pred_df['power_w'].max():.2f} W")
         print(f"Average predicted power: {pred_df['power_w'].mean():.2f} W")
