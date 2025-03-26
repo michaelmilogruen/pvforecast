@@ -32,15 +32,13 @@ class PVForecaster:
     consistent with the training process in process_training_data.py.
     """
     
-    def __init__(self, feature_set='station', sequence_length=24):
+    def __init__(self, sequence_length=24):
         """
         Initialize the PV Forecaster with model and configuration.
         
         Args:
-            feature_set (str): Feature set to use ('inca', 'station', or 'combined')
             sequence_length (int): Sequence length for LSTM input
         """
-        self.feature_set = feature_set
         self.sequence_length = sequence_length
         
         # Location parameters for Leoben
@@ -156,42 +154,19 @@ class PVForecaster:
             raise
     
     def _define_feature_sets(self):
-        """Define the feature sets used in training"""
-        return {
-            'inca': [
-                'INCA_GlobalRadiation [W m-2]',
-                'INCA_Temperature [degree_Celsius]',
-                'INCA_WindSpeed [m s-1]',
-                'INCA_ClearSkyIndex',
-                'hour_sin',
-                'hour_cos',
-                'day_cos',
-                'day_sin',
-                'isNight'
-            ],
-            'station': [
-                'GlobalRadiation [W m-2]',
-                'Temperature [degree_Celsius]',
-                'WindSpeed [m s-1]',
-                'ClearSkyIndex',
-                'hour_sin',
-                'hour_cos',
-                'day_cos',
-                'day_sin',
-                'isNight'
-            ],
-            'combined': [
-                'Combined_GlobalRadiation [W m-2]',
-                'Combined_Temperature [degree_Celsius]',
-                'Combined_WindSpeed [m s-1]',
-                'Combined_ClearSkyIndex',
-                'hour_sin',
-                'hour_cos',
-                'day_cos',
-                'day_sin',
-                'isNight'
-            ]
-        }
+        """Define the features used in training"""
+        # Single standard feature set for all prediction scenarios
+        return [
+            'GlobalRadiation [W m-2]',
+            'Temperature [degree_Celsius]',
+            'WindSpeed [m s-1]',
+            'ClearSkyIndex',
+            'hour_sin',
+            'hour_cos',
+            'day_sin',
+            'day_cos',
+            'isNight'
+        ]
     
     def fetch_weather_data(self, hours=60):
         """
@@ -292,17 +267,11 @@ class PVForecaster:
         Returns:
             DataFrame with added time-based features
         """
-        # Ensure all required columns exist before calculations begin
+        # Ensure required columns exist before calculations begin
         print("Adding essential feature mappings before derived calculations")
         if 'GlobalRadiation [W m-2]' not in df.columns and 'poa_global' in df.columns:
             df['GlobalRadiation [W m-2]'] = df['poa_global']
             print("Created GlobalRadiation [W m-2] from poa_global")
-            
-        if 'INCA_GlobalRadiation [W m-2]' not in df.columns and 'poa_global' in df.columns:
-            df['INCA_GlobalRadiation [W m-2]'] = df['poa_global']
-            
-        if 'Combined_GlobalRadiation [W m-2]' not in df.columns and 'poa_global' in df.columns:
-            df['Combined_GlobalRadiation [W m-2]'] = df['poa_global']
             
         # Print available columns for debugging
         print("Columns before derived calculations:", df.columns.tolist())
@@ -319,20 +288,20 @@ class PVForecaster:
         df['day_sin'] = np.sin(2 * np.pi * df.index.dayofyear / 365)
         df['day_cos'] = np.cos(2 * np.pi * df.index.dayofyear / 365)
         
-        # Add isNight feature based on solar position
+        # Calculate ClearSkyIndex from total_cloud_cover and add isNight feature
         df = self.calculate_clear_sky(df)
         
         return df
     
     def calculate_clear_sky(self, df):
             """
-            Calculate ClearSkyIndex and append it to the given dataframe.
+            Calculate ClearSkyIndex directly from total_cloud_cover and add isNight feature.
             
             Args:
                 df: DataFrame with datetime index
                 
             Returns:
-                DataFrame with added ClearSkyIndex
+                DataFrame with added ClearSkyIndex and isNight features
             """
             # Define location
             location = Location(self.latitude, self.longitude, self.tz, self.altitude)
@@ -340,78 +309,31 @@ class PVForecaster:
             # Get solar position
             solar_position = location.get_solarposition(df.index)
             
-            # Calculate pressure based on altitude and convert from hPa to Pa
-            pressure = pvlib.atmosphere.alt2pres(self.altitude) * 100
-            
-            # Approximate precipitable water (in cm)
-            precipitable_water = 1.0  # Default value as a simple approximation
-            
             # Calculate apparent elevation and ensure it's not negative
             apparent_elevation = 90 - solar_position['apparent_zenith']
             apparent_elevation = apparent_elevation.clip(lower=0)
             
-            # Calculate clear sky irradiance using simplified Solis model
-            clear_sky = simplified_solis(
-                apparent_elevation=apparent_elevation,
-                aod700=0.1,  # Default value for aerosol optical depth
-                precipitable_water=precipitable_water,
-                pressure=pressure
-            )
-            
-            # Set irradiance components to 0 for nighttime (elevation <= 0)
-            night_mask = (apparent_elevation <= 0)
-            clear_sky.loc[night_mask, 'ghi'] = 0
-            
-            # Set other irradiance components to 0 for nighttime if they exist
-            if 'dni' in clear_sky.columns:
-                clear_sky.loc[night_mask, 'dni'] = 0
-            if 'dhi' in clear_sky.columns:
-                clear_sky.loc[night_mask, 'dhi'] = 0
-            
             # Add isNight feature (1 for night, 0 for day)
+            night_mask = (apparent_elevation <= 0)
             df['isNight'] = night_mask.astype(int)
             
-            # Calculate ClearSkyIndex based on feature set
-            if self.feature_set == 'inca':
-                radiation_col = 'INCA_GlobalRadiation [W m-2]'
-                df['INCA_ClearSkyIndex'] = np.where(
-                    clear_sky['ghi'] > 10,
-                    df[radiation_col] / clear_sky['ghi'],
-                    0
-                )
-                df['INCA_ClearSkyIndex'] = df['INCA_ClearSkyIndex'].clip(0, 1.5)
-                
-            elif self.feature_set == 'station':
-                radiation_col = 'GlobalRadiation [W m-2]'
-                df['ClearSkyIndex'] = np.where(
-                    clear_sky['ghi'] > 10,
-                    df[radiation_col] / clear_sky['ghi'],
-                    0
-                )
-                df['ClearSkyIndex'] = df['ClearSkyIndex'].clip(0, 1.5)
-                
-            else:  # combined
-                # INCA
-                inca_rad_col = 'INCA_GlobalRadiation [W m-2]'
-                df['INCA_ClearSkyIndex'] = np.where(
-                    clear_sky['ghi'] > 10,
-                    df[inca_rad_col] / clear_sky['ghi'],
-                    0
-                )
-                df['INCA_ClearSkyIndex'] = df['INCA_ClearSkyIndex'].clip(0, 1.5)
-                
-                # Station
-                rad_col = 'GlobalRadiation [W m-2]'
-                df['ClearSkyIndex'] = np.where(
-                    clear_sky['ghi'] > 10,
-                    df[rad_col] / clear_sky['ghi'],
-                    0
-                )
-                df['ClearSkyIndex'] = df['ClearSkyIndex'].clip(0, 1.5)
-                
-                # Combined
-                df['Combined_ClearSkyIndex'] = df[['INCA_ClearSkyIndex', 'ClearSkyIndex']].mean(axis=1)
-                
+            # Ensure we have GlobalRadiation [W m-2]
+            if 'GlobalRadiation [W m-2]' not in df.columns and 'poa_global' in df.columns:
+                df['GlobalRadiation [W m-2]'] = df['poa_global']
+                print("Created GlobalRadiation [W m-2] from poa_global in calculate_clear_sky")
+            
+            # Calculate ClearSkyIndex directly from total_cloud_cover
+            if 'total_cloud_cover' in df.columns:
+                # Use 1.0 - total_cloud_cover as ClearSkyIndex
+                # This creates an inverse relationship where:
+                # - 0 cloud cover = 1.0 clear sky index (perfectly clear)
+                # - 1 cloud cover = 0.0 clear sky index (completely cloudy)
+                df['ClearSkyIndex'] = 1.0 - df['total_cloud_cover']
+                print("Created ClearSkyIndex directly from total_cloud_cover")
+            else:
+                print("Warning: total_cloud_cover not found. Setting ClearSkyIndex to default value.")
+                df['ClearSkyIndex'] = 0.5  # Set a default middle value if no cloud cover data
+            
             return df
     
     def normalize_data(self, df):
@@ -424,49 +346,64 @@ class PVForecaster:
         Returns:
             DataFrame with normalized features
         """
-        # Define which columns should be normalized with which scaler
-        # This should match the approach in process_training_data.py
-        time_features = ['hour_sin', 'hour_cos', 'day_sin', 'day_cos', 'isNight']
-        
-        # Check which features need MinMaxScaler vs StandardScaler
+        # Define the standard feature columns used in training
         minmax_columns = [
-            # INCA Radiation features
-            'INCA_GlobalRadiation [W m-2]',
-            'INCA_ClearSkyGHI',
-            'INCA_ClearSkyDHI',  # Added missing feature
-            'INCA_ClearSkyDNI',  # Added missing feature
-            # Station Radiation features
-            'GlobalRadiation [W m-2]',
-            'ClearSkyGHI',
-            # Combined Radiation features
-            'Combined_GlobalRadiation [W m-2]',
+            'GlobalRadiation [W m-2]'
         ]
         
         standard_columns = [
-            # INCA weather measurements
-            'INCA_Temperature [degree_Celsius]',
-            'INCA_WindSpeed [m s-1]',
-            'INCA_ClearSkyIndex',
-            # Station weather measurements
             'Temperature [degree_Celsius]',
             'WindSpeed [m s-1]',
-            'ClearSkyIndex',
-            # Combined measurements
-            'Combined_Temperature [degree_Celsius]',
-            'Combined_WindSpeed [m s-1]',
-            'Combined_ClearSkyIndex'
+            'ClearSkyIndex'
         ]
         
-        # Filter columns that actually exist in the dataframe
+        # Time features are typically not normalized
+        time_features = ['hour_sin', 'hour_cos', 'day_sin', 'day_cos', 'isNight']
+        
+        # Ensure all required columns exist
+        missing_columns = []
+        for col in minmax_columns + standard_columns + time_features:
+            if col not in df.columns:
+                missing_columns.append(col)
+                
+        if missing_columns:
+            print(f"Warning: Missing required columns for normalization: {missing_columns}")
+            print(f"Available columns: {df.columns.tolist()}")
+            # Create missing columns with defaults if possible
+            for col in missing_columns:
+                if col == 'ClearSkyIndex' and 'total_cloud_cover' in df.columns:
+                    df[col] = 1.0 - df['total_cloud_cover']
+                    print(f"Created {col} from total_cloud_cover")
+                    missing_columns.remove(col)
+                elif col == 'GlobalRadiation [W m-2]' and 'poa_global' in df.columns:
+                    df[col] = df['poa_global']
+                    print(f"Created {col} from poa_global")
+                    missing_columns.remove(col)
+                elif col == 'Temperature [degree_Celsius]' and 'temp_air' in df.columns:
+                    df[col] = df['temp_air']
+                    print(f"Created {col} from temp_air")
+                    missing_columns.remove(col)
+                elif col == 'WindSpeed [m s-1]' and 'wind_speed' in df.columns:
+                    df[col] = df['wind_speed']
+                    print(f"Created {col} from wind_speed")
+                    missing_columns.remove(col)
+            
+            # If there are still missing columns, raise an error
+            if missing_columns:
+                raise KeyError(f"Cannot normalize data. Missing required columns: {missing_columns}")
+        
+        # Filter columns that actually exist in the dataframe (should now be all of them)
         minmax_columns = [col for col in minmax_columns if col in df.columns]
         standard_columns = [col for col in standard_columns if col in df.columns]
         
         # Apply scalers
         if minmax_columns:
             df[minmax_columns] = self.minmax_scaler.transform(df[minmax_columns])
+            print(f"Normalized {minmax_columns} using MinMaxScaler")
         
         if standard_columns:
             df[standard_columns] = self.standard_scaler.transform(df[standard_columns])
+            print(f"Normalized {standard_columns} using StandardScaler")
         
         return df
     def prepare_data_for_prediction(self, weather_data=None, hours=60):
@@ -501,71 +438,68 @@ class PVForecaster:
         # Add derived features
         df = self.add_derived_features(df)
         
-        # Proactively add all required features to ensure they're available
-        print("Adding all required features to ensure compatibility with the model")
+        # Proactively add all required standard features to ensure they're available
+        print("Adding standard feature set required for model inference")
         
-        # Add all required features from all feature sets
-        # Common time features are already added in add_derived_features
-        
-        # Station features
+        # Add standard features needed for prediction
         try:
+            # Radiation data
             if 'GlobalRadiation [W m-2]' not in df.columns:
-                df['GlobalRadiation [W m-2]'] = df['poa_global']
+                if 'poa_global' in df.columns:
+                    df['GlobalRadiation [W m-2]'] = df['poa_global']
+                    print("Created GlobalRadiation [W m-2] from poa_global")
+                else:
+                    raise KeyError("Cannot create GlobalRadiation [W m-2] - no poa_global column available")
+            
+            # Temperature data
             if 'Temperature [degree_Celsius]' not in df.columns:
-                df['Temperature [degree_Celsius]'] = df['temp_air']
+                if 'temp_air' in df.columns:
+                    df['Temperature [degree_Celsius]'] = df['temp_air']
+                    print("Created Temperature [degree_Celsius] from temp_air")
+                else:
+                    raise KeyError("Cannot create Temperature [degree_Celsius] - no temp_air column available")
+            
+            # Wind data
             if 'WindSpeed [m s-1]' not in df.columns:
-                df['WindSpeed [m s-1]'] = df['wind_speed']
+                if 'wind_speed' in df.columns:
+                    df['WindSpeed [m s-1]'] = df['wind_speed']
+                    print("Created WindSpeed [m s-1] from wind_speed")
+                else:
+                    raise KeyError("Cannot create WindSpeed [m s-1] - no wind_speed column available")
+            
+            # Clear sky index
             if 'ClearSkyIndex' not in df.columns:
-                df['ClearSkyIndex'] = df['total_cloud_cover']
+                if 'total_cloud_cover' in df.columns:
+                    df['ClearSkyIndex'] = 1.0 - df['total_cloud_cover']
+                    print("Created ClearSkyIndex from total_cloud_cover")
+                else:
+                    print("Warning: total_cloud_cover not available - setting ClearSkyIndex to default value")
+                    df['ClearSkyIndex'] = 0.5  # Default value if no cloud cover data
+                    
         except KeyError as e:
-            print(f"Error creating station features: {e}")
+            print(f"Error creating standard features: {e}")
             print(f"Available columns: {df.columns.tolist()}")
-            raise KeyError(f"Cannot create necessary feature mappings. Missing column: {e}")
-        
-        # INCA features
-        try:
-            if 'INCA_GlobalRadiation [W m-2]' not in df.columns:
-                df['INCA_GlobalRadiation [W m-2]'] = df['poa_global']
-            if 'INCA_Temperature [degree_Celsius]' not in df.columns:
-                df['INCA_Temperature [degree_Celsius]'] = df['temp_air']
-            if 'INCA_WindSpeed [m s-1]' not in df.columns:
-                df['INCA_WindSpeed [m s-1]'] = df['wind_speed']
-            if 'INCA_ClearSkyIndex' not in df.columns:
-                df['INCA_ClearSkyIndex'] = df['total_cloud_cover']
-            if 'INCA_ClearSkyDHI' not in df.columns:
-                df['INCA_ClearSkyDHI'] = 0.0
-            if 'INCA_ClearSkyDNI' not in df.columns:
-                df['INCA_ClearSkyDNI'] = 0.0
-            if 'INCA_ClearSkyGHI' not in df.columns:
-                df['INCA_ClearSkyGHI'] = 0.0
-        except KeyError as e:
-            print(f"Error creating INCA features: {e}")
-            print(f"Available columns: {df.columns.tolist()}")
-            raise KeyError(f"Cannot create necessary INCA feature mappings. Missing column: {e}")
-        
-        # Combined features
-        try:
-            if 'Combined_GlobalRadiation [W m-2]' not in df.columns:
-                df['Combined_GlobalRadiation [W m-2]'] = df['poa_global']
-            if 'Combined_Temperature [degree_Celsius]' not in df.columns:
-                df['Combined_Temperature [degree_Celsius]'] = df['temp_air']
-            if 'Combined_WindSpeed [m s-1]' not in df.columns:
-                df['Combined_WindSpeed [m s-1]'] = df['wind_speed']
-            if 'Combined_ClearSkyIndex' not in df.columns:
-                df['Combined_ClearSkyIndex'] = df['total_cloud_cover']
-        except KeyError as e:
-            print(f"Error creating Combined features: {e}")
-            print(f"Available columns: {df.columns.tolist()}")
-            raise KeyError(f"Cannot create necessary Combined feature mappings. Missing column: {e}")
+            raise
         
         # Normalize the data
         df = self.normalize_data(df)
         
-        # Get the features for the selected feature set
-        features = self.feature_sets[self.feature_set]
+        # Get the standard features set
+        features = self.feature_sets
         
         # Extract features as numpy array
-        X = df[features].values
+        # Check if all features are available
+        missing_features = [f for f in features if f not in df.columns]
+        if missing_features:
+            print(f"Warning: Missing features: {missing_features}")
+            print("Creating a DataFrame with just the standard features needed for prediction")
+            
+            # Create a new DataFrame with standardized feature set
+            X = np.zeros((len(df), len(features)))
+            print(f"Created empty feature array with shape: {X.shape}")
+        else:
+            # All features are available, use them directly
+            X = df[features].values
         
         return df, X
     
@@ -608,43 +542,62 @@ class PVForecaster:
             # Print available columns for debugging
             print("Available columns for prediction:", df.columns.tolist())
             
-            # Ensure required columns exist
-            required_columns = ['poa_global', 'temp_air', 'wind_speed', 'total_cloud_cover',
-                               'hour_sin', 'hour_cos', 'day_sin', 'day_cos', 'isNight']
+            # Create a new DataFrame with exactly the required features
+            # This ensures the correct order and presence of all features
+            training_data = pd.DataFrame()
             
-            for col in required_columns:
-                if col not in df.columns:
-                    raise KeyError(f"Required column '{col}' not found in processed data. Check the API response structure.")
+            # Add required features in the correct order, with fallbacks
+            if 'GlobalRadiation [W m-2]' in df.columns:
+                training_data['GlobalRadiation [W m-2]'] = df['GlobalRadiation [W m-2]']
+            elif 'poa_global' in df.columns:
+                training_data['GlobalRadiation [W m-2]'] = df['poa_global']
+                print("Using poa_global for GlobalRadiation [W m-2]")
+            else:
+                raise KeyError("No radiation data available for prediction")
+                
+            if 'Temperature [degree_Celsius]' in df.columns:
+                training_data['Temperature [degree_Celsius]'] = df['Temperature [degree_Celsius]']
+            elif 'temp_air' in df.columns:
+                training_data['Temperature [degree_Celsius]'] = df['temp_air']
+                print("Using temp_air for Temperature [degree_Celsius]")
+            else:
+                raise KeyError("No temperature data available for prediction")
+                
+            if 'WindSpeed [m s-1]' in df.columns:
+                training_data['WindSpeed [m s-1]'] = df['WindSpeed [m s-1]']
+            elif 'wind_speed' in df.columns:
+                training_data['WindSpeed [m s-1]'] = df['wind_speed']
+                print("Using wind_speed for WindSpeed [m s-1]")
+            else:
+                raise KeyError("No wind speed data available for prediction")
+                if 'ClearSkyIndex' in df.columns:
+                    training_data['ClearSkyIndex'] = df['ClearSkyIndex']
+                elif 'total_cloud_cover' in df.columns:
+                    training_data['ClearSkyIndex'] = 1.0 - df['total_cloud_cover']
+                    print("Using 1.0 - total_cloud_cover for ClearSkyIndex")
+                else:
+                    print("Warning: No cloud cover data available. Using default ClearSkyIndex value.")
+                    training_data['ClearSkyIndex'] = 0.5  # Default value
+                raise KeyError("No clear sky index or cloud cover data available for prediction")
+                
+            # Add time features
+            for time_feature in ['hour_sin', 'hour_cos', 'day_sin', 'day_cos', 'isNight']:
+                if time_feature in df.columns:
+                    training_data[time_feature] = df[time_feature]
+                else:
+                    raise KeyError(f"Missing time feature: {time_feature}")
             
-            # Create a new DataFrame with the same feature names as used during training
-            # Map the inference feature names to the training feature names
-            training_data = pd.DataFrame({
-                'GlobalRadiation [W m-2]': df['poa_global'],
-                'Temperature [degree_Celsius]': df['temp_air'],
-                'WindSpeed [m s-1]': df['wind_speed'],
-                'ClearSkyIndex': df['total_cloud_cover'],  # Use cloud cover as ClearSkyIndex
-                'hour_sin': df['hour_sin'],
-                'hour_cos': df['hour_cos'],
-                'day_sin': df['day_sin'],
-                'day_cos': df['day_cos'],
-                'isNight': df['isNight']
-            })
+            # Our standard feature set should exactly match what we defined in _define_feature_sets
+            standard_features = self.feature_sets
             
-            # Define the features in the same order as used during training
-            training_features = [
-                'GlobalRadiation [W m-2]',
-                'Temperature [degree_Celsius]',
-                'WindSpeed [m s-1]',
-                'ClearSkyIndex',
-                'hour_sin',
-                'hour_cos',
-                'day_sin',
-                'day_cos',
-                'isNight'
-            ]
-            
-            # Use the training data for prediction
-            X = training_data[training_features].values
+            # Verify we have all needed features
+            missing_features = [f for f in standard_features if f not in training_data.columns]
+            if missing_features:
+                raise KeyError(f"Missing required features after preparation: {missing_features}")
+                
+            # Use the standardized training data for prediction
+            X = training_data[standard_features].values
+            print(f"Prepared prediction data with shape: {X.shape}")
             
             # Create sequences
             X_seq = self.create_sequences(X, self.sequence_length)
@@ -697,12 +650,8 @@ class PVForecaster:
         
         # Create a second y-axis for irradiance
         ax2 = ax1.twinx()
-        if self.feature_set == 'inca':
-            irradiance_col = 'INCA_GlobalRadiation [W m-2]'
-        elif self.feature_set == 'station':
-            irradiance_col = 'GlobalRadiation [W m-2]'
-        else:
-            irradiance_col = 'Combined_GlobalRadiation [W m-2]'
+        # Always use the standard radiation column
+        irradiance_col = 'GlobalRadiation [W m-2]'
             
         # Get the original (unnormalized) irradiance values
         # We need to inverse transform the normalized values
@@ -746,7 +695,7 @@ class PVForecaster:
         lines2, labels2 = ax2.get_legend_handles_labels()
         ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
         
-        plt.title(f'PV Power Forecast ({self.feature_set.capitalize()})')
+        plt.title('PV Power Forecast')
         plt.grid(True, alpha=0.3)
         
         # Format x-axis to show dates nicely
@@ -810,7 +759,7 @@ def main():
     Main function to run the forecaster as a standalone script.
     """
     # Create forecaster with default settings
-    forecaster = PVForecaster(feature_set='station', sequence_length=24)
+    forecaster = PVForecaster(sequence_length=24)
     
     # Make predictions
     try:
@@ -827,7 +776,6 @@ def main():
         
         # Print summary
         print("\nForecast Summary:")
-        print(f"Feature set: {forecaster.feature_set}")
         print(f"Sequence length: {forecaster.sequence_length}")
         print(f"Forecast period: {pred_df['timestamp'].min()} to {pred_df['timestamp'].max()}")
         print(f"Maximum predicted power: {pred_df['power_w'].max():.2f} W")
