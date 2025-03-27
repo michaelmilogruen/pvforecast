@@ -1,0 +1,108 @@
+# LSTM Low Resolution Model Architecture
+
+Model: "sequential_3"
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
+┃ Layer (type)                         ┃ Output Shape                ┃         Param # ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
+│ lstm_5 (LSTM)                        │ (None, 24, 229)             │         218,924 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ batch_normalization_9                │ (None, 24, 229)             │             916 │
+│ (BatchNormalization)                 │                             │                 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dropout_6 (Dropout)                  │ (None, 24, 229)             │               0 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ lstm_6 (LSTM)                        │ (None, 66)                  │          78,144 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ batch_normalization_10               │ (None, 66)                  │             264 │
+│ (BatchNormalization)                 │                             │                 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dropout_7 (Dropout)                  │ (None, 66)                  │               0 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dense_7 (Dense)                      │ (None, 42)                  │           2,814 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ batch_normalization_11               │ (None, 42)                  │             168 │
+│ (BatchNormalization)                 │                             │                 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dense_8 (Dense)                      │ (None, 1)                   │              43 │
+└──────────────────────────────────────┴─────────────────────────────┴─────────────────┘
+ Total params: 902,473 (3.44 MB)
+ Trainable params: 300,599 (1.15 MB)
+ Non-trainable params: 674 (2.63 KB)
+ Optimizer params: 601,200 (2.29 MB)
+
+
+
+# Data Information
+
+## Data Source
+- Data loaded from: data/station_data_1h.parquet
+- Data shape: 16181 training samples, 3467 validation samples, 3469 test samples
+- Sequence length: 24 hours
+- Training sequences shape: (16157, 24, 9)
+- Validation sequences shape: (3443, 24, 9)
+- Testing sequences shape: (3445, 24, 9)
+
+## Features Used
+The model was trained on the following features:
+- GlobalRadiation [W m-2]
+- Temperature [degree_Celsius]
+- WindSpeed [m s-1]
+- ClearSkyIndex
+- hour_sin
+- hour_cos
+- day_sin
+- day_cos
+- isNight
+
+Target variable: power_w
+
+## Scaler Structure and Implementation
+
+The model uses multiple scalers for different types of features, based on their statistical distributions:
+
+### MinMaxScaler
+Applied to the following features:
+- GlobalRadiation [W m-2]
+- ClearSkyIndex
+Scales values to a range of [0, 1]
+
+### StandardScaler
+Applied to the following features:
+- Temperature [degree_Celsius]
+Standardizes features to zero mean and unit variance
+
+### RobustScaler
+Applied to the following features:
+- WindSpeed [m s-1]
+Scales features using statistics that are robust to outliers
+
+### No Scaling
+The following features were not scaled:
+- hour_sin
+- hour_cos
+- day_sin
+- day_cos
+- isNight
+These features are either binary (0/1) or already in the range [-1, 1]
+
+### Target Scaler
+A separate MinMaxScaler was used for the target variable (power_w).
+This target-specific scaler is used for:
+1. Scaling the target variable during training
+2. Inverse transforming predictions back to the original scale during evaluation
+3. Inverse transforming predictions during inference
+
+## Inference Data Preparation
+
+To prepare data for inference with this model, you should:
+
+1. Ensure your data has the same features as the training data
+2. Resample your data to 1-hour resolution if needed
+3. Calculate clear sky values and clear sky index
+4. Add time-based features (hour_sin, hour_cos, day_sin, day_cos)
+5. Add isNight indicator
+6. Apply the same scaling approach using the saved scalers
+7. Create sequences of length 24 (looking back 24 hours)
+8. After prediction, use the target scaler to inverse transform the predictions back to watts
+
+The saved scalers should be loaded and applied to ensure consistent scaling between training and inference.
