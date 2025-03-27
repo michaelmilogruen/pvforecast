@@ -346,6 +346,10 @@ class PVForecaster:
         Returns:
             DataFrame with normalized features
         """
+        # Check for required features at the start
+        if 'ClearSkyIndex' not in df.columns:
+            print("WARNING: ClearSkyIndex not found at start of normalization")
+        
         # Define the standard feature columns used in training
         minmax_columns = [
             'GlobalRadiation [W m-2]'
@@ -391,19 +395,82 @@ class PVForecaster:
             # If there are still missing columns, raise an error
             if missing_columns:
                 raise KeyError(f"Cannot normalize data. Missing required columns: {missing_columns}")
+            
+            # Debug: Check columns after creating missing ones
+            print("Columns after creating missing ones:", df.columns.tolist())
+            print("ClearSkyIndex in DataFrame after creating missing ones:", 'ClearSkyIndex' in df.columns)
         
         # Filter columns that actually exist in the dataframe (should now be all of them)
         minmax_columns = [col for col in minmax_columns if col in df.columns]
         standard_columns = [col for col in standard_columns if col in df.columns]
         
-        # Apply scalers
-        if minmax_columns:
-            df[minmax_columns] = self.minmax_scaler.transform(df[minmax_columns])
-            print(f"Normalized {minmax_columns} using MinMaxScaler")
+        # Apply scalers with robust error handling and explicit mismatch reporting
+        try:
+            # Apply MinMaxScaler to radiation data
+            if 'GlobalRadiation [W m-2]' in df.columns:
+                try:
+                    # Use reshape to handle single column
+                    rad_data = df['GlobalRadiation [W m-2]'].values.reshape(-1, 1)
+                    df['GlobalRadiation [W m-2]'] = self.minmax_scaler.transform(rad_data)
+                    print("Normalized GlobalRadiation using MinMaxScaler")
+                except Exception as e:
+                    print(f"SCALER MISMATCH: Error normalizing GlobalRadiation: {e}")
+                    print("WARNING: Using fallback normalization for GlobalRadiation")
+                    # Simple fallback normalization
+                    max_val = df['GlobalRadiation [W m-2]'].max()
+                    if max_val > 0:
+                        df['GlobalRadiation [W m-2]'] = df['GlobalRadiation [W m-2]'] / max_val
+            
+            # Apply StandardScaler to temperature data
+            if 'Temperature [degree_Celsius]' in df.columns:
+                try:
+                    temp_data = df['Temperature [degree_Celsius]'].values.reshape(-1, 1)
+                    df['Temperature [degree_Celsius]'] = self.standard_scaler.transform(temp_data)
+                    print("Normalized Temperature using StandardScaler")
+                except Exception as e:
+                    print(f"SCALER MISMATCH: Error normalizing Temperature: {e}")
+                    print("WARNING: Using fallback normalization for Temperature")
+                    # Simple standardization as fallback
+                    mean = df['Temperature [degree_Celsius]'].mean()
+                    std = df['Temperature [degree_Celsius]'].std()
+                    if std > 0:
+                        df['Temperature [degree_Celsius]'] = (df['Temperature [degree_Celsius]'] - mean) / std
+            
+            # Apply StandardScaler to wind speed data
+            if 'WindSpeed [m s-1]' in df.columns:
+                try:
+                    wind_data = df['WindSpeed [m s-1]'].values.reshape(-1, 1)
+                    df['WindSpeed [m s-1]'] = self.standard_scaler.transform(wind_data)
+                    print("Normalized WindSpeed using StandardScaler")
+                except Exception as e:
+                    print(f"SCALER MISMATCH: Error normalizing WindSpeed: {e}")
+                    print("WARNING: Using fallback normalization for WindSpeed")
+                    # Simple standardization as fallback
+                    mean = df['WindSpeed [m s-1]'].mean()
+                    std = df['WindSpeed [m s-1]'].std()
+                    if std > 0:
+                        df['WindSpeed [m s-1]'] = (df['WindSpeed [m s-1]'] - mean) / std
+            
+            # For ClearSkyIndex, use simple min-max scaling (it's already between 0-1)
+            if 'ClearSkyIndex' in df.columns:
+                try:
+                    # Try to use the standard scaler first
+                    csi_data = df['ClearSkyIndex'].values.reshape(-1, 1)
+                    df['ClearSkyIndex'] = self.standard_scaler.transform(csi_data)
+                    print("Normalized ClearSkyIndex using StandardScaler")
+                except Exception as e:
+                    print(f"SCALER MISMATCH: Error normalizing ClearSkyIndex: {e}")
+                    print("WARNING: ClearSkyIndex will use its original values (already in 0-1 range)")
+                    # No need to transform, it's already in the right range
+                    
+        except Exception as e:
+            print(f"CRITICAL SCALER ERROR: {e}")
+            print(f"Current columns: {df.columns.tolist()}")
+            print("WARNING: Continuing with unnormalized data - prediction accuracy may be affected")
         
-        if standard_columns:
-            df[standard_columns] = self.standard_scaler.transform(df[standard_columns])
-            print(f"Normalized {standard_columns} using StandardScaler")
+        # Final verification of critical features
+        if 'ClearSkyIndex' not in df.columns:
+            print("WARNING: ClearSkyIndex missing at end of normalization")
         
         return df
     def prepare_data_for_prediction(self, weather_data=None, hours=60):
@@ -437,6 +504,10 @@ class PVForecaster:
         
         # Add derived features
         df = self.add_derived_features(df)
+        
+        # Verify ClearSkyIndex was created
+        if 'ClearSkyIndex' not in df.columns:
+            print("WARNING: ClearSkyIndex not created after adding derived features")
         
         # Proactively add all required standard features to ensure they're available
         print("Adding standard feature set required for model inference")
@@ -484,6 +555,10 @@ class PVForecaster:
         # Normalize the data
         df = self.normalize_data(df)
         
+        # Verify critical features after normalization
+        if 'ClearSkyIndex' not in df.columns:
+            print("WARNING: ClearSkyIndex missing after normalization")
+        
         # Get the standard features set
         features = self.feature_sets
         
@@ -494,12 +569,17 @@ class PVForecaster:
             print(f"Warning: Missing features: {missing_features}")
             print("Creating a DataFrame with just the standard features needed for prediction")
             
+            # Debug: Print each missing feature
+            for feature in missing_features:
+                print(f"Missing feature: {feature}")
+                
             # Create a new DataFrame with standardized feature set
             X = np.zeros((len(df), len(features)))
             print(f"Created empty feature array with shape: {X.shape}")
         else:
             # All features are available, use them directly
             X = df[features].values
+            print("All features available for prediction array")
         
         return df, X
     
@@ -539,8 +619,9 @@ class PVForecaster:
             # Prepare data for prediction
             df, X = self.prepare_data_for_prediction(weather_data, hours)
             
-            # Print available columns for debugging
-            print("Available columns for prediction:", df.columns.tolist())
+            # Verify critical features before prediction
+            if 'ClearSkyIndex' not in df.columns:
+                print("WARNING: ClearSkyIndex missing before prediction")
             
             # Create a new DataFrame with exactly the required features
             # This ensures the correct order and presence of all features
@@ -570,15 +651,16 @@ class PVForecaster:
                 print("Using wind_speed for WindSpeed [m s-1]")
             else:
                 raise KeyError("No wind speed data available for prediction")
-                if 'ClearSkyIndex' in df.columns:
-                    training_data['ClearSkyIndex'] = df['ClearSkyIndex']
-                elif 'total_cloud_cover' in df.columns:
-                    training_data['ClearSkyIndex'] = 1.0 - df['total_cloud_cover']
-                    print("Using 1.0 - total_cloud_cover for ClearSkyIndex")
-                else:
-                    print("Warning: No cloud cover data available. Using default ClearSkyIndex value.")
-                    training_data['ClearSkyIndex'] = 0.5  # Default value
-                raise KeyError("No clear sky index or cloud cover data available for prediction")
+            
+            # Fix indentation: ClearSkyIndex check was incorrectly nested inside wind speed else block
+            if 'ClearSkyIndex' in df.columns:
+                training_data['ClearSkyIndex'] = df['ClearSkyIndex']
+            elif 'total_cloud_cover' in df.columns:
+                training_data['ClearSkyIndex'] = 1.0 - df['total_cloud_cover']
+                print("Using 1.0 - total_cloud_cover for ClearSkyIndex")
+            else:
+                print("Warning: No cloud cover data available. Using default ClearSkyIndex value.")
+                training_data['ClearSkyIndex'] = 0.5  # Default value
                 
             # Add time features
             for time_feature in ['hour_sin', 'hour_cos', 'day_sin', 'day_cos', 'isNight']:
@@ -594,6 +676,14 @@ class PVForecaster:
             missing_features = [f for f in standard_features if f not in training_data.columns]
             if missing_features:
                 raise KeyError(f"Missing required features after preparation: {missing_features}")
+                
+            # Verify features match between model and data
+            if set(standard_features) != set(training_data.columns):
+                print("WARNING: Feature mismatch between model and prepared data")
+                print(f"Model features: {standard_features}")
+                print(f"Data features: {list(training_data.columns)}")
+            else:
+                print("Features match between model and prepared data")
                 
             # Use the standardized training data for prediction
             X = training_data[standard_features].values
@@ -763,7 +853,7 @@ def main():
     
     # Make predictions
     try:
-        pred_df = forecaster.predict(hours=60)
+        pred_df = forecaster.predict(hours=24)
         
         # Plot forecast
         forecaster.plot_forecast(pred_df, save_path='results/forecast_plot.png')

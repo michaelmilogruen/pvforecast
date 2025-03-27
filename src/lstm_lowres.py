@@ -895,9 +895,84 @@ class LSTMLowResForecaster:
         model.save(f'models/lstm_lowres/final_model_{self.timestamp}.keras')
         print(f"Model saved to models/lstm_lowres/final_model_{self.timestamp}.keras")
         
-        # Save model summary to file
+        # Save model summary to file with detailed information
         with open(f'models/lstm_lowres/model_summary_{self.timestamp}.txt', 'w', encoding='utf-8') as f:
+            # Write model architecture summary
+            f.write("# LSTM Low Resolution Model Architecture\n\n")
             model.summary(print_fn=lambda x: f.write(x + '\n'))
+            
+            # Write data information
+            f.write("\n\n# Data Information\n\n")
+            f.write(f"## Data Source\n")
+            f.write(f"- Data loaded from: data/station_data_1h.parquet\n")
+            f.write(f"- Data shape: {len(data['X_train'])} training samples, {len(data['X_val'])} validation samples, {len(data['X_test'])} test samples\n")
+            f.write(f"- Sequence length: {self.sequence_length} hours\n")
+            f.write(f"- Training sequences shape: {X_train_seq.shape}\n")
+            f.write(f"- Validation sequences shape: {X_val_seq.shape}\n")
+            f.write(f"- Testing sequences shape: {X_test_seq.shape}\n\n")
+            
+            f.write("## Features Used\n")
+            f.write("The model was trained on the following features:\n")
+            for feature in feature_info['all_features']:
+                f.write(f"- {feature}\n")
+            f.write(f"\nTarget variable: {feature_info['target']}\n\n")
+            
+            # Write scaler information
+            f.write("## Scaler Structure and Implementation\n\n")
+            f.write("The model uses multiple scalers for different types of features, based on their statistical distributions:\n\n")
+            
+            # MinMaxScaler
+            if feature_info['minmax_features']:
+                f.write("### MinMaxScaler\n")
+                f.write("Applied to the following features:\n")
+                for feature in feature_info['minmax_features']:
+                    f.write(f"- {feature}\n")
+                f.write("Scales values to a range of [0, 1]\n\n")
+            
+            # StandardScaler
+            if feature_info['standard_features']:
+                f.write("### StandardScaler\n")
+                f.write("Applied to the following features:\n")
+                for feature in feature_info['standard_features']:
+                    f.write(f"- {feature}\n")
+                f.write("Standardizes features to zero mean and unit variance\n\n")
+            
+            # RobustScaler
+            if feature_info['robust_features']:
+                f.write("### RobustScaler\n")
+                f.write("Applied to the following features:\n")
+                for feature in feature_info['robust_features']:
+                    f.write(f"- {feature}\n")
+                f.write("Scales features using statistics that are robust to outliers\n\n")
+            
+            # No Scaling
+            if feature_info['no_scaling_features']:
+                f.write("### No Scaling\n")
+                f.write("The following features were not scaled:\n")
+                for feature in feature_info['no_scaling_features']:
+                    f.write(f"- {feature}\n")
+                f.write("These features are either binary (0/1) or already in the range [-1, 1]\n\n")
+            
+            # Target Scaler
+            f.write("### Target Scaler\n")
+            f.write(f"A separate MinMaxScaler was used for the target variable ({feature_info['target']}).\n")
+            f.write("This target-specific scaler is used for:\n")
+            f.write("1. Scaling the target variable during training\n")
+            f.write("2. Inverse transforming predictions back to the original scale during evaluation\n")
+            f.write("3. Inverse transforming predictions during inference\n\n")
+            
+            f.write("## Inference Data Preparation\n\n")
+            f.write("To prepare data for inference with this model, you should:\n\n")
+            f.write("1. Ensure your data has the same features as the training data\n")
+            f.write("2. Resample your data to 1-hour resolution if needed\n")
+            f.write("3. Calculate clear sky values and clear sky index\n")
+            f.write("4. Add time-based features (hour_sin, hour_cos, day_sin, day_cos)\n")
+            f.write("5. Add isNight indicator\n")
+            f.write("6. Apply the same scaling approach using the saved scalers\n")
+            f.write("7. Create sequences of length 24 (looking back 24 hours)\n")
+            f.write("8. After prediction, use the target scaler to inverse transform the predictions back to watts\n\n")
+            
+            f.write("The saved scalers should be loaded and applied to ensure consistent scaling between training and inference.\n")
         
         return evaluation_results
 
