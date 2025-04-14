@@ -31,8 +31,8 @@ from scipy import stats
 
 # Define parameters
 PARAMS = {
-    'start': '2020-01-01 00:00',
-    'end': '2020-12-31 23:00',
+    'start': '2022-01-01 01:10',
+    'end': '2024-01-01 00:10',
     'latitude': 47.3877,
     'longitude': 15.0941,
     'tilt': 30,
@@ -111,10 +111,10 @@ def calculate_power_output(params: dict) -> Tuple[pd.DataFrame, pd.DataFrame]:
     location = Location(latitude=params['latitude'], longitude=params['longitude'],
                         tz='Europe/Vienna', altitude=547.6, name='EVT')
 
-    poa_data_2020 = poadata.get_pvgis_data(params['latitude'], params['longitude'], 2020, 2020, params['tilt'], params['azimuth'])
+    poa_data_2020 = poadata.get_pvgis_data(params['latitude'], params['longitude'], 2022, 2023, params['tilt'], params['azimuth'])
     poa_data_2020.to_csv("poa_data_2020_Leoben_EVT_io.csv")
     poa_data_2020 = pd.read_csv('poa_data_2020_Leoben_EVT_io.csv', index_col=0)
-    poa_data_2020.index = pd.date_range(start='2020-01-01 00:00', periods=len(poa_data_2020.index), freq="h")
+    poa_data_2020.index = pd.date_range(start='2022-01-01 01:10', periods=len(poa_data_2020.index), freq="h")
     poa_data = poa_data_2020[params['start']:params['end']]
 
     solarpos = location.get_solarposition(times=pd.date_range(params['start'], end=params['end'], freq="h"))
