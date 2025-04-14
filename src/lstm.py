@@ -22,6 +22,7 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 from sklearn.metrics import roc_curve
 from tensorflow.keras.layers import Input
+from tensorflow.keras.utils import plot_model
 
 def split_sequences(X, y, n_steps):
     X_, y_ = list(), list()
@@ -174,6 +175,16 @@ def main():
 
     # Continue with model training...
     model = build_lstm_model(x_train.shape[1], x_train.shape[2])
+    
+    # Generate the model visualization
+    plot_model(model,
+               to_file='model_architecture.png',
+               show_shapes=True,
+               show_dtype=False,
+               show_layer_names=True,
+               rankdir='TB',
+               dpi=96)
+    
     checkpoint = ModelCheckpoint('best_model.keras', monitor='val_loss', save_best_only=True, mode='min')
     early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
     history = model.fit(x_train, y_train, validation_data=(x_test, y_test), epochs=50, batch_size=32, callbacks=[checkpoint, early_stopping], verbose=1)

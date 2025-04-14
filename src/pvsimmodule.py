@@ -14,17 +14,19 @@ import os
 from typing import Tuple
 
 import matplotlib.pyplot as plt
+import numpy as np
 import openpyxl
 import pandas as pd
 import pvlib
 from openpyxl.utils import get_column_letter
 from pvlib.location import Location
 from pvlib.pvsystem import PVSystem
-from src import poadata
+import poadata
 from datetime import datetime, timedelta
 import sys
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
+from scipy import stats
 
 
 # Define parameters
@@ -131,7 +133,7 @@ def calculate_power_output(params: dict) -> Tuple[pd.DataFrame, pd.DataFrame]:
                                                a_ref, I_L_ref, I_o_ref, R_sh_ref, R_s, Adjust)
 
     mpp = pvlib.pvsystem.max_power_point(*cec_params, method="newton")
-    system = PVSystem(modules_per_string=23, strings_per_inverter=3)
+    system = PVSystem(modules_per_string=14, strings_per_inverter=3)
     dc_scaled = system.scale_voltage_current_power(mpp)
 
     cec_inverters = pvlib.pvsystem.retrieve_sam('CECInverter')
@@ -153,32 +155,203 @@ def calculate_power_output(params: dict) -> Tuple[pd.DataFrame, pd.DataFrame]:
     return ac_results, poa_data_2020
 
 
-def plot_results(ac_results: pd.DataFrame) -> None:
+def plot_results(ac_results: pd.DataFrame, poa_data: pd.DataFrame = None) -> None:
     """
-    Plot the AC power results over time and as a monthly sum.
-
+    Create high-quality plots for a scientific paper.
+    
+    Generates three publication-quality diagrams:
+    1. Annual time series of PV power output
+    2. Monthly energy production with cumulative yield
+    3. PV power vs. irradiance correlation (if POA data is provided)
+    
     Args:
         ac_results (pd.DataFrame): The DataFrame containing the AC power results.
-
+        poa_data (pd.DataFrame, optional): The DataFrame containing POA irradiance data.
+    
     Returns:
         None
     """
-    ac_results.plot(figsize=(16, 9))
-    plt.title("AC Power - PVSystem")
-    plt.xlabel("Time")
-    plt.ylabel("Energy Yield")
-    plt.grid(True)
-    plt.savefig("energy_yield_start_to_end.png")
-    plt.show()
-
-    monthly_sum = ac_results.resample('M').sum()
-    monthly_sum.plot(figsize=(16, 9))
-    plt.title("AC Power - PVSystem (Monthly Sum)")
-    plt.xlabel("Time")
-    plt.ylabel("Energy Yield")
-    plt.grid(True)
-    plt.savefig("energy_yield_monthly_sum.png")
-    plt.show()
+    # Set publication-quality plot style
+    try:
+        plt.style.use('seaborn-v0_8-whitegrid')  # Updated style name
+    except:
+        plt.style.use('seaborn-whitegrid')  # Fallback for older matplotlib
+        
+    plt.rcParams.update({
+        'font.family': 'serif',
+        'font.size': 12,
+        'axes.labelsize': 14,
+        'axes.titlesize': 16,
+        'xtick.labelsize': 12,
+        'ytick.labelsize': 12,
+        'legend.fontsize': 12,
+        'figure.titlesize': 18,
+        'figure.figsize': (10, 6),
+        'figure.dpi': 300,
+        'savefig.dpi': 300,
+        'savefig.bbox': 'tight',
+        'savefig.pad_inches': 0.1
+    })
+    
+    # Create results directory if it doesn't exist
+    os.makedirs('results', exist_ok=True)
+    
+    # 1. Annual time series with seasonal highlighting
+    fig, ax = plt.subplots()
+    
+    # Resample to daily data for a cleaner plot
+    daily_power = ac_results.resample('D').mean()
+    
+    # Plot the data
+    daily_power.plot(ax=ax, color='#1f77b4', linewidth=1.5)
+    
+    # Add season markers
+    seasons = {
+        'Winter': ((1, 1), (2, 28), '#deebf7'),
+        'Spring': ((3, 1), (5, 31), '#e5f5e0'),
+        'Summer': ((6, 1), (8, 31), '#ffffd4'),
+        'Autumn': ((9, 1), (11, 30), '#fee8c8'),
+        'Winter 2': ((12, 1), (12, 31), '#deebf7')
+    }
+    
+    year = daily_power.index[0].year
+    
+    # Add background shading for seasons
+    handles = []
+    for season, ((start_month, start_day), (end_month, end_day), color) in seasons.items():
+        start_date = pd.Timestamp(f"{year}-{start_month:02d}-{start_day:02d}")
+        end_date = pd.Timestamp(f"{year}-{end_month:02d}-{end_day:02d}")
+        
+        # Only add if within our data's time range
+        if start_date <= daily_power.index[-1] and end_date >= daily_power.index[0]:
+            handle = ax.axvspan(start_date, end_date, alpha=0.3, color=color, label=season.replace(' 2', ''))
+            # Only add to handles if not a duplicate season (Winter 2)
+            if not season.endswith('2'):
+                handles.append(handle)
+    
+    # Format plot
+    ax.set_title("PV System Power Output (2020)")
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Power (W)")
+    ax.grid(True, linestyle='--', alpha=0.7)
+    
+    # Create custom legend for seasons
+    season_names = [s for s in seasons.keys() if not s.endswith('2')]
+    season_colors = [c for _, _, c in [seasons[s] for s in season_names]]
+    custom_patches = [plt.Rectangle((0, 0), 1, 1, fc=color, alpha=0.3) for color in season_colors]
+    ax.legend(custom_patches, season_names, loc='upper right')
+    
+    fig.tight_layout()
+    fig.savefig("results/pv_power_annual.png")
+    plt.close(fig)
+    
+    # 2. Monthly energy production with cumulative yield
+    monthly_sum = ac_results.resample('ME').sum() / 1000  # Convert to kWh
+    cumulative_sum = monthly_sum.cumsum()
+    
+    fig, ax1 = plt.subplots()
+    
+    # Bar chart for monthly production
+    bars = ax1.bar(monthly_sum.index, monthly_sum.values, width=20, color='#1f77b4', alpha=0.8,
+                  label='Monthly Production')
+    
+    # Add value labels on top of bars
+    for bar, value in zip(bars, monthly_sum.values):
+        ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 5,
+                f'{value:.0f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+    
+    # Format x-axis with month names
+    ax1.set_xlabel('Month')
+    ax1.set_ylabel('Monthly Energy Production (kWh)')
+    ax1.set_xticks(monthly_sum.index)
+    ax1.set_xticklabels([date.strftime('%b') for date in monthly_sum.index], rotation=45)
+    
+    # Secondary y-axis for cumulative production
+    ax2 = ax1.twinx()
+    ax2.plot(cumulative_sum.index, cumulative_sum.values, 'r-o', linewidth=2.5, 
+            label='Cumulative Production')
+    ax2.set_ylabel('Cumulative Energy Production (kWh)')
+    
+    # Add title
+    fig.suptitle('Monthly and Cumulative Energy Production (2020)', y=0.98)
+    
+    # Combine legends from both axes
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+    
+    fig.tight_layout()
+    fig.savefig('results/monthly_energy_production.png')
+    plt.close(fig)
+    
+    # 3. Irradiance vs. Power correlation plot (if POA data is available)
+    if poa_data is not None and isinstance(poa_data, pd.DataFrame) and 'poa_global' in poa_data.columns:
+        try:
+            # Get common timestamps
+            common_idx = ac_results.index.intersection(poa_data.index)
+            
+            if len(common_idx) > 0:
+                # Create a dataframe with both measurements
+                irr_power = pd.DataFrame({
+                    'power': ac_results.loc[common_idx].values.flatten(),
+                    'irradiance': poa_data.loc[common_idx, 'poa_global'].values,
+                    'month': pd.DatetimeIndex(common_idx).month
+                })
+                
+                # Filter for daylight hours (irradiance > 50 W/m²)
+                irr_power = irr_power[irr_power['irradiance'] > 50]
+                
+                if len(irr_power) > 0:
+                    fig, ax = plt.subplots()
+                    
+                    # Define season colors based on month
+                    cmap = plt.cm.viridis
+                    scatter = ax.scatter(
+                        irr_power['irradiance'], 
+                        irr_power['power'],
+                        c=irr_power['month'], 
+                        cmap=cmap,
+                        alpha=0.6, 
+                        s=20
+                    )
+                    
+                    # Add linear regression line
+                    try:
+                        # Calculate linear regression
+                        slope, intercept, r_value, p_value, std_err = stats.linregress(
+                            irr_power['irradiance'], 
+                            irr_power['power']
+                        )
+                        
+                        # Create line data
+                        x = np.array([irr_power['irradiance'].min(), irr_power['irradiance'].max()])
+                        y = intercept + slope * x
+                        
+                        # Plot the line
+                        ax.plot(x, y, 'r-', linewidth=2, 
+                               label=f'Fit: y = {slope:.2f}x + {intercept:.1f}\nR² = {r_value**2:.3f}')
+                    except:
+                        pass  # Skip if regression fails
+                    
+                    # Add colorbar showing months
+                    cbar = fig.colorbar(scatter, ax=ax, ticks=range(1,13))
+                    cbar.set_label('Month')
+                    cbar.ax.set_yticklabels(['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                                           'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'])
+                    
+                    # Format plot
+                    ax.set_xlabel('Global POA Irradiance (W/m²)')
+                    ax.set_ylabel('AC Power (W)')
+                    ax.set_title('Correlation: Solar Irradiance vs. PV Power Output')
+                    ax.grid(True, linestyle='--', alpha=0.7)
+                    ax.legend(loc='upper left')
+                    
+                    fig.tight_layout()
+                    fig.savefig('results/irradiance_power_correlation.png')
+                    plt.close(fig)
+        except Exception as e:
+            print(f"Error creating irradiance correlation plot: {e}")
+            plt.close('all')
 
 
 def main() -> int:
@@ -189,7 +362,7 @@ def main() -> int:
         int: The exit status code.
     """
     ac_results, poa_data_2020 = calculate_power_output(PARAMS)
-    plot_results(ac_results)
+    plot_results(ac_results, poa_data_2020)
     execute_vba_actions('results.xlsx')
     return 0
 
