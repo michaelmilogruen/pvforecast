@@ -102,12 +102,12 @@ if __name__ == "__main__":
     azimuth = 149.716  # azimuth for SOUTH (pvlib = 180°, PVGIS = 0°)
     
     # Get data without PV calculation
-    poa_data_2020 = get_pvgis_data(latitude, longitude, 2022, 2023, tilt, azimuth)
+    poa_data = get_pvgis_data(latitude, longitude, 2022, 2023, tilt, azimuth)
     
     # Example with PV calculation enabled
     poa_data_with_pv = get_pvgis_data(
         latitude, longitude, 2022, 2023, tilt, azimuth,
-        pvcalculation=True, peakpower=5.0, loss=14.0
+        pvcalculation=True, peakpower=10.56, loss=14.0
     )
     print("\nSample data with PV calculation:")
     if 'P' in poa_data_with_pv.columns:
@@ -116,10 +116,10 @@ if __name__ == "__main__":
         print("Warning: No PV power output column found in the results")
 
     # Print the timezone information after conversion
-    if 'time' in poa_data_2020.columns:
-        print(f"Timestamp timezone: {poa_data_2020['time'].dt.tz}")
+    if 'time' in poa_data.columns:
+        print(f"Timestamp timezone: {poa_data['time'].dt.tz}")
     else:
-        print(f"Timestamp timezone: {poa_data_2020.index.tz}")
+        print(f"Timestamp timezone: {poa_data.index.tz}")
 
     # Save the data as a CSV file with Vienna timezone indicator
     # Get the script directory and construct proper paths relative to the project root
@@ -132,7 +132,7 @@ if __name__ == "__main__":
 
     # Save the regular POA data
     output_path = os.path.join(output_dir, "poa_data.csv")
-    poa_data_2020.to_csv(output_path)
+    poa_data.to_csv(output_path)
     print(f"POA irradiance data saved to: {output_path}")
     
     # Save the PV calculation data to a separate file
@@ -140,4 +140,4 @@ if __name__ == "__main__":
     poa_data_with_pv.to_csv(pv_output_path)
     print(f"PV calculation data saved to: {pv_output_path}")
 
-    print(poa_data_2020.head())
+    print(poa_data.head())
