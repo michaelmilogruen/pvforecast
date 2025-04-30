@@ -106,7 +106,7 @@ def calculate_power_output(params: dict) -> Tuple[pd.DataFrame, pd.DataFrame]:
         params (dict): A dictionary containing various parameters for the PV system and simulation.
 
     Returns:
-        Tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the AC power results and POA data for 2020.
+        Tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the AC power results and POA data.
     """
     location = Location(latitude=params['latitude'], longitude=params['longitude'],
                         tz='Europe/Vienna', altitude=547.6, name='EVT')
@@ -137,7 +137,7 @@ def calculate_power_output(params: dict) -> Tuple[pd.DataFrame, pd.DataFrame]:
     dc_scaled = system.scale_voltage_current_power(mpp)
 
     cec_inverters = pvlib.pvsystem.retrieve_sam('CECInverter')
-    inverter = cec_inverters['Advanced_Energy_Industries__AE_3TL_23_10_08__480V_']
+    inverter = cec_inverters['Fronius_International_GmbH__Fronius_Symo_12_5_3_480__480V_']
     ac_results = pvlib.inverter.sandia(v_dc=dc_scaled.v_mp, p_dc=dc_scaled.p_mp, inverter=inverter)
 
     results_df = pd.concat([ac_results, dc_scaled.i_mp, dc_scaled.v_mp, dc_scaled.p_mp, temp_cell], axis=1)

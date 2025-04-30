@@ -1,4 +1,4 @@
-time,P,poa_direct,poa_sky_diffuse,poa_ground_diffuse,solar_elevation,temp_air,wind_speed,Int,poa_diffuse,poa_global
+time,P,poa_direct,poa_sky_diffuse,poa_ground_diffuse,solar_elevation,temp_air,wind_speed,Int,poa_diffuse,poa_global_calc
 2022-01-01 01:10:00+01:00,0.0,0.0,0.0,0.0,0.0,-1.31,2.07,0,0.0,0.0
 2022-01-01 02:10:00+01:00,0.0,0.0,0.0,0.0,0.0,-0.58,2.14,0,0.0,0.0
 2022-01-01 03:10:00+01:00,0.0,0.0,0.0,0.0,0.0,-0.27,2.14,0,0.0,0.0

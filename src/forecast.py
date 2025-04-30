@@ -168,7 +168,7 @@ class PVForecaster:
             'isNight'
         ]
     
-    def fetch_weather_data(self, hours=60):
+    def fetch_weather_data(self, hours=24):
         """
         Fetch weather forecast data from the API.
         
@@ -181,7 +181,9 @@ class PVForecaster:
         lat_lon = f"{self.latitude},{self.longitude}"
         current_time = datetime.now().replace(minute=0, second=0, microsecond=0)
         fc_start_time = current_time.strftime("%Y-%m-%dT%H:%M")
-        fc_end_time = (current_time + pd.Timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M")
+        fc_end_time = (current_time + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M")
+        
+        print(f"Requesting forecast from {fc_start_time} to {fc_end_time} ({hours} hours)")
         
         url = f"https://dataset.api.hub.geosphere.at/v1/timeseries/forecast/nwp-v1-1h-2500m?lat_lon={lat_lon}&parameters=cape&parameters=cin&parameters=grad&parameters=mnt2m&parameters=mxt2m&parameters=rain_acc&parameters=rh2m&parameters=rr_acc&parameters=snow_acc&parameters=snowlmt&parameters=sp&parameters=sundur_acc&parameters=sy&parameters=t2m&parameters=tcc&parameters=u10m&parameters=ugust&parameters=v10m&parameters=vgust&start={fc_start_time}&end={fc_end_time}"
         
@@ -190,7 +192,8 @@ class PVForecaster:
             
             if response.status_code == 200:
                 data = response.json()
-                print("Weather data fetched successfully.")
+                print(f"Weather data fetched successfully for {hours} hours.")
+                print(f"Received {len(data['timestamps'])} data points.")
                 return data
             else:
                 print(f"Failed to fetch data. Status code: {response.status_code}")
@@ -600,7 +603,7 @@ class PVForecaster:
         
         return np.array(sequences)
     
-    def predict(self, weather_data=None, hours=60, return_df=True):
+    def predict(self, weather_data=None, hours=24, return_df=True):
         """
         Predict PV power output.
         
@@ -700,19 +703,42 @@ class PVForecaster:
             
             # Ensure non-negative power values
             y_pred_inv = np.maximum(y_pred_inv, 0)
+            
+            print(f"Generated {len(y_pred_inv)} prediction points")
+            
         except Exception as e:
             print(f"Error running forecast: {e}")
             raise
         
         if return_df:
             # Create a DataFrame with predictions and features
-            # The predictions start after sequence_length-1 timesteps
-            pred_start_idx = self.sequence_length - 1
-            pred_df = df.iloc[pred_start_idx:pred_start_idx + len(y_pred)].copy()
-            pred_df['power_w'] = y_pred_inv
+            # For a proper 24-hour forecast, we should return all hours, not just from sequence_length-1
+            # We'll match predictions with the actual hours in the forecast
+            
+            # IMPORTANT CHANGE: Return all available forecast hours instead of just the sequence tail
+            # The first valid prediction is for time at index sequence_length-1
+            # pred_start_idx = self.sequence_length - 1
+            
+            # Instead of limiting output to just a few hours at the end, return all hours with predictions
+            pred_df = df.copy()
+            
+            # We have fewer predictions than input hours due to the sequence requirement
+            # Fill the first sequence_length-1 hours with NaN to indicate no predictions
+            pred_df['power_w'] = np.nan
+            
+            # Add predictions to all hours that have them (hours after sequence formation)
+            valid_hours = len(pred_df) - self.sequence_length + 1
+            if valid_hours > 0:
+                pred_df.iloc[self.sequence_length-1:, pred_df.columns.get_loc('power_w')] = y_pred_inv.flatten()
             
             # Reset index to have timestamp as a column
             pred_df.reset_index(inplace=True)
+            
+            # Print detailed information about the forecast for debugging
+            print(f"Total hours in weather data: {len(df)}")
+            print(f"Sequence length: {self.sequence_length}")
+            print(f"Valid prediction hours: {valid_hours}")
+            print(f"Number of predictions: {len(y_pred_inv)}")
             
             return pred_df
         else:
@@ -740,45 +766,55 @@ class PVForecaster:
         
         # Create a second y-axis for irradiance
         ax2 = ax1.twinx()
-        # Always use the standard radiation column
-        irradiance_col = 'GlobalRadiation [W m-2]'
-            
-        # Get the original (unnormalized) irradiance values
-        # We need to inverse transform the normalized values
-        # Create a simple one-column array for the irradiance values
-        irradiance_values = pred_df[irradiance_col].values.reshape(-1, 1)
         
-        # Create a separate scaler just for this column to avoid dimension issues
-        from sklearn.preprocessing import MinMaxScaler
-        irradiance_scaler = MinMaxScaler()
-        irradiance_scaler.min_ = np.array([0])  # Assuming normalized values are between 0 and 1
-        irradiance_scaler.scale_ = np.array([1])
-        
-        # Use the direct values without inverse transformation for now
-        # This is a simplification - in a real application, you might want to
-        # properly inverse transform using the original scaler parameters
-        
-        ax2.plot(pred_df['timestamp'], pred_df[irradiance_col], 'r-', label='Global Irradiance (W/m²)')
+        # Display the unnormalized irradiance values
+        # Get the real-world irradiance values from the raw data (before normalization)
+        if 'poa_global' in pred_df.columns:
+            # Use raw values directly as they're already in W/m²
+            ax2.plot(pred_df['timestamp'], pred_df['poa_global'], 'r-', label='Global Irradiance (W/m²)')
+        else:
+            # If we only have normalized values, attempt to unnormalize them
+            try:
+                # Create a copy of normalized irradiance values
+                irradiance_values = pred_df['GlobalRadiation [W m-2]'].values.reshape(-1, 1)
+                # Inverse transform to get original scale if possible
+                if hasattr(self, 'minmax_scaler'):
+                    unnormalized_irradiance = self.minmax_scaler.inverse_transform(irradiance_values)
+                    ax2.plot(pred_df['timestamp'], unnormalized_irradiance, 'r-', label='Global Irradiance (W/m²)')
+                else:
+                    # Fallback - use as is but make it clear it might be normalized
+                    ax2.plot(pred_df['timestamp'], pred_df['GlobalRadiation [W m-2]'], 'r-', 
+                            label='Global Irradiance (normalized, W/m²)')
+            except Exception as e:
+                print(f"Warning: Could not unnormalize irradiance values: {e}")
+                # Use available irradiance column
+                ax2.plot(pred_df['timestamp'], pred_df['GlobalRadiation [W m-2]'], 'r-', 
+                        label='Global Irradiance (W/m²)')
+                
         ax2.set_ylabel('Irradiance (W/m²)', color='r')
         ax2.tick_params(axis='y', labelcolor='r')
         
         # Add night periods as shaded areas
-        night_periods = []
-        current_night = None
-        for i, row in pred_df.iterrows():
-            if row['isNight'] == 1 and current_night is None:
-                current_night = i
-            elif row['isNight'] == 0 and current_night is not None:
-                night_periods.append((current_night, i))
-                current_night = None
-        
-        # Add the last night period if it extends to the end
-        if current_night is not None:
-            night_periods.append((current_night, len(pred_df) - 1))
-        
-        for start, end in night_periods:
-            ax1.axvspan(pred_df['timestamp'].iloc[start], pred_df['timestamp'].iloc[end], 
-                        alpha=0.2, color='gray')
+        if 'isNight' in pred_df.columns:
+            night_periods = []
+            current_night = None
+            
+            # Identify continuous night periods
+            for i, row in pred_df.iterrows():
+                if row['isNight'] == 1 and current_night is None:
+                    current_night = i
+                elif row['isNight'] == 0 and current_night is not None:
+                    night_periods.append((current_night, i))
+                    current_night = None
+            
+            # Add the last night period if it extends to the end
+            if current_night is not None:
+                night_periods.append((current_night, len(pred_df) - 1))
+            
+            # Add shading for night periods
+            for start, end in night_periods:
+                ax1.axvspan(pred_df['timestamp'].iloc[start], pred_df['timestamp'].iloc[end], 
+                            alpha=0.2, color='gray')
         
         # Add legend
         lines1, labels1 = ax1.get_legend_handles_labels()
@@ -851,9 +887,11 @@ def main():
     # Create forecaster with default settings
     forecaster = PVForecaster(sequence_length=24)
     
-    # Make predictions
+    # Make predictions for 24 hours explicitly
     try:
-        pred_df = forecaster.predict(hours=24)
+        # Request 24 hours forecast
+        print("Generating 24-hour forecast from current time...")
+        pred_df = forecaster.predict(hours=24, return_df=True)
         
         # Plot forecast
         forecaster.plot_forecast(pred_df, save_path='results/forecast_plot.png')
@@ -868,6 +906,7 @@ def main():
         print("\nForecast Summary:")
         print(f"Sequence length: {forecaster.sequence_length}")
         print(f"Forecast period: {pred_df['timestamp'].min()} to {pred_df['timestamp'].max()}")
+        print(f"Number of forecast hours: {len(pred_df)}")
         print(f"Maximum predicted power: {pred_df['power_w'].max():.2f} W")
         print(f"Average predicted power: {pred_df['power_w'].mean():.2f} W")
         print(f"Total predicted energy: {pred_df['power_w'].sum() / 1000:.2f} kWh")
