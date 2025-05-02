@@ -1,0 +1,129 @@
+# LSTM High Resolution Model (18-step lookback)
+
+Timestamp: 20250501_093631
+
+## Model Architecture
+
+Model: "sequential"
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
+┃ Layer (type)                         ┃ Output Shape                ┃         Param # ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
+│ lstm (LSTM)                          │ (None, 18, 64)              │          18,944 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ batch_normalization                  │ (None, 18, 64)              │             256 │
+│ (BatchNormalization)                 │                             │                 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dropout (Dropout)                    │ (None, 18, 64)              │               0 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ lstm_1 (LSTM)                        │ (None, 32)                  │          12,416 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ batch_normalization_1                │ (None, 32)                  │             128 │
+│ (BatchNormalization)                 │                             │                 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dropout_1 (Dropout)                  │ (None, 32)                  │               0 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dense (Dense)                        │ (None, 32)                  │           1,056 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ batch_normalization_2                │ (None, 32)                  │             128 │
+│ (BatchNormalization)                 │                             │                 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dropout_2 (Dropout)                  │ (None, 32)                  │               0 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dense_1 (Dense)                      │ (None, 16)                  │             528 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ batch_normalization_3                │ (None, 16)                  │              64 │
+│ (BatchNormalization)                 │                             │                 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dense_2 (Dense)                      │ (None, 1)                   │              17 │
+└──────────────────────────────────────┴─────────────────────────────┴─────────────────┘
+ Total params: 100,037 (390.77 KB)
+ Trainable params: 33,249 (129.88 KB)
+ Non-trainable params: 288 (1.12 KB)
+ Optimizer params: 66,500 (259.77 KB)
+
+
+
+## Data Information
+
+- Data Source: data/station_data_10min.parquet
+- Data Resolution: 10 minutes
+- Sequence Length: 18 steps (3.00 hours lookback)
+
+
+## Features Used
+The model was trained on the following features:
+- GlobalRadiation [W m-2]
+- Temperature [degree_Celsius]
+- WindSpeed [m s-1]
+- ClearSkyIndex
+- time_of_day_sin
+- time_of_day_cos
+- day_sin
+- day_cos
+- isNight
+
+Target variable: power_w
+
+## Scaler Structure and Implementation
+
+Multiple scalers were used for different feature types:
+
+### MinMaxScaler
+Applied to: GlobalRadiation [W m-2], ClearSkyIndex
+
+### StandardScaler
+Applied to: Temperature [degree_Celsius]
+
+### RobustScaler
+Applied to: WindSpeed [m s-1]
+
+### No Scaling
+Applied to: time_of_day_sin, time_of_day_cos, day_sin, day_cos, isNight
+
+### Target Scaler
+A MinMaxScaler was used for the target variable (power_w).
+Scalers were fitted only on the training data and saved.
+
+## Hyperparameters
+
+Configuration used for the final model:
+- lstm_units: [64, 32]
+- dense_units: [32, 16]
+- dropout_rates: [0.2, 0.15]
+- dense_dropout_rates: [0.1, 0.05]
+- learning_rate: 0.001
+- bidirectional: False
+- batch_norm: True
+
+## Evaluation Metrics (on Test Set)
+
+### Original Scale Metrics
+- RMSE: 774.83
+- MAE: 309.27
+- MAPE: 1880987864506.35%
+- SMAPE: 83.39%
+- R² Score: 0.3607
+
+## Inference Data Preparation for this Model
+
+To prepare 10-minute data for inference using this trained model, you must follow these steps precisely:
+
+1.  Load your raw 10-minute data, ensuring it has the same meteorological features used during training.
+2.  Calculate the following time-based and cyclical features:
+    -   `time_of_day_hours = hour + minute / 60.0`
+    -   `time_of_day_sin = sin(2 * pi * time_of_day_hours / 24.0)`
+    -   `time_of_day_cos = cos(2 * pi * time_of_day_hours / 24.0)`
+    -   `day_sin = sin(2 * pi * day_of_year / 365.0)`
+    -   `day_cos = cos(2 * pi * day_of_year / 365.0)`
+    -   `isNight` (e.g., based on Global Radiation < 1.0 W/m² or a sun position calculation).
+3.  Ensure the 'ClearSkyIndex' feature is present or calculated for the 10-minute data.
+4.  Order the features exactly as they were ordered during training:
+    GlobalRadiation [W m-2], Temperature [degree_Celsius], WindSpeed [m s-1], ClearSkyIndex, time_of_day_sin, time_of_day_cos, day_sin, day_cos, isNight
+5.  Load the saved scalers (`minmax_scaler_*.pkl`, `standard_scaler_*.pkl`, `robust_scaler_*.pkl`) from the model directory.
+6.  Apply the corresponding loaded scalers to the appropriate feature columns as done during training.
+7.  Create input sequences of length **{self.sequence_length}** from the scaled feature data.
+8.  Feed these sequences to the loaded model for prediction.
+9.  Load the saved target scaler (`target_scaler_*.pkl`).
+10. Use the target scaler to **inverse transform** the model's predictions back to the original power (Watts) scale.
+
+Following these steps is crucial for the model to produce meaningful predictions on new data.

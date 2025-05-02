@@ -13,6 +13,7 @@ Key features:
 3. LSTM model architecture
 4. Hyperparameter optimization using Bayesian optimization with Optuna
 5. Model evaluation and visualization
+6. Fix for 'tf' not defined error in Lambda layer.
 """
 
 import numpy as np
@@ -20,7 +21,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization, Bidirectional
+from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization, Bidirectional, Lambda
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
@@ -33,6 +34,12 @@ import argparse
 # Set random seeds for reproducibility
 np.random.seed(42)
 tf.random.set_seed(42)
+
+# Define the clipping function outside the class/method scope
+# This ensures 'tf' is accessible when the function is called by the Lambda layer
+def clip_scaled_output(x):
+    """Clips the scaled output to be non-negative."""
+    return tf.clip_by_value(x, clip_value_min=0.0, clip_value_max=tf.float32.max)
 
 class LSTMHighResForecaster:
     def __init__(self, sequence_length=144, batch_size=32, epochs=50):
@@ -53,9 +60,11 @@ class LSTMHighResForecaster:
         self.results_dir = 'results'
         self.optuna_results_dir = os.path.join(self.results_dir, 'lstm_10min_optuna')
 
+        # Ensure directories exist
         os.makedirs(self.model_dir, exist_ok=True)
         os.makedirs(self.results_dir, exist_ok=True)
         os.makedirs(self.optuna_results_dir, exist_ok=True)
+
 
         # Timestamp for model versioning
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -144,7 +153,7 @@ class LSTMHighResForecaster:
             print("'isNight' feature created based on Global Radiation.")
         else:
             # If GlobalRadiation is not available, a more complex sun position calculation would be needed
-            print("Warning: 'GlobalRadiation [W m-2]' not found. Cannot create 'isNight' feature based on radiation.")
+            print("Warning: 'GlobalRadiation [W m-2]' not found. Cannot create 'isNight' feature based on irradiation.")
             # For robustness, add a placeholder column if expected later
             df['isNight'] = 0 # Add a default column if not found, might impact model if relied upon
 
@@ -173,7 +182,7 @@ class LSTMHighResForecaster:
             'time_of_day_cos',
             'day_sin', # Keep day features for seasonal variation
             'day_cos', # Keep day features for seasonal variation
-            'isNight'
+            #'isNight'
         ]
 
         # Verify all intended features exist in the dataframe
@@ -250,7 +259,7 @@ class LSTMHighResForecaster:
             feature_info: Dictionary with feature information
 
         Returns:
-            Dictionary with split and scaled data and fitted scalers
+            Dictionary with split and scaled data and fitted scalers, plus original test_df
         """
         # Split data into train, validation, and test sets by time
         # Use 70% for training, 15% for validation, 15% for testing
@@ -262,7 +271,7 @@ class LSTMHighResForecaster:
 
         train_df = df.iloc[:train_size]
         val_df = df.iloc[train_size : train_size + val_size]
-        test_df = df.iloc[train_size + val_size : ]
+        test_df = df.iloc[train_size + val_size : ] # Keep original test_df
 
         print(f"Total data size: {total_size}")
         print(f"Train set size: {len(train_df)}")
@@ -280,6 +289,7 @@ class LSTMHighResForecaster:
         # Fit scalers on training data only to prevent data leakage
         if minmax_scaler:
             minmax_scaler.fit(train_df[feature_info['minmax_features']])
+            # Use os.path.join for robust path handling
             joblib.dump(minmax_scaler, os.path.join(self.model_dir, f'minmax_scaler_{self.timestamp}.pkl'))
 
         if standard_scaler:
@@ -335,23 +345,26 @@ class LSTMHighResForecaster:
         # Apply scaling to each dataset
         X_train = scale_features(train_df)
         X_val = scale_features(val_df)
-        X_test = scale_features(test_df)
+        X_test = scale_features(test_df) # Scale the features for creating sequences
 
         # Scale target variable
         y_train = target_scaler.transform(train_df[[feature_info['target']]])
         y_val = target_scaler.transform(val_df[[feature_info['target']]])
-        y_test = target_scaler.transform(test_df[[feature_info['target']]])
+        y_test = target_scaler.transform(test_df[[feature_info['target']]]) # Scale the target for evaluation metrics
+
 
         return {
             'X_train': X_train, 'y_train': y_train,
             'X_val': X_val, 'y_val': y_val,
-            'X_test': X_test, 'y_test': y_test,
+            'X_test': X_test, 'y_test': y_test, # Scaled y_test
+            'original_test_df': test_df, # Return original test_df for post-processing checks
             'scalers': {
                 'minmax': minmax_scaler,
                 'standard': standard_scaler,
                 'robust': robust_scaler,
                 'target': target_scaler
-            }
+            },
+            'feature_info': feature_info # Pass feature info to know radiation column name
         }
 
     def create_sequences(self, X, y, time_steps):
@@ -399,24 +412,24 @@ class LSTMHighResForecaster:
     def build_model(self, input_shape, trial=None):
         """
         Build an LSTM model with optional hyperparameters from Optuna trial.
+        Includes post-processing (clipping) within the model as the last layer.
 
         Args:
             input_shape: Shape of input data (time_steps, features)
             trial: Optuna trial object for hyperparameter optimization (optional)
 
         Returns:
-            Compiled LSTM model
+            Compiled LSTM model with post-processing layer
         """
         # If trial is provided, use it to suggest hyperparameters
         if trial:
             # Suggest hyperparameters using Optuna
             # Number of layers
-            num_lstm_layers = trial.suggest_int('num_lstm_layers', 1, 4) # Increased potential layers for complex data
+            num_lstm_layers = trial.suggest_int('num_lstm_layers', 1, 4)
             num_dense_layers = trial.suggest_int('num_dense_layers', 1, 3)
 
-            # LSTM units for each layer - use consistent parameter ranges for each position
+            # LSTM units for each layer
             lstm_units = []
-            # Adjusting suggested unit ranges for potentially longer sequences/more complex data
             if num_lstm_layers >= 1:
                 lstm_units.append(trial.suggest_int('lstm_units_1', 64, 512, step=32))
             if num_lstm_layers >= 2:
@@ -427,7 +440,7 @@ class LSTMHighResForecaster:
                 lstm_units.append(trial.suggest_int('lstm_units_4', 8, 64, step=4))
 
 
-            # Dense units for each layer - use consistent parameter ranges for each position
+            # Dense units for each layer
             dense_units = []
             if num_dense_layers >= 1:
                 dense_units.append(trial.suggest_int('dense_units_1', 32, 128, step=16))
@@ -436,21 +449,19 @@ class LSTMHighResForecaster:
             if num_dense_layers >= 3:
                 dense_units.append(trial.suggest_int('dense_units_3', 8, 32, step=4))
 
-            # Suggest different dropout rates for each layer
+            # Dropout rates
             lstm_dropout_rates = []
-            for i in range(1, num_lstm_layers + 1):
-                lstm_dropout_rates.append(trial.suggest_float(f'lstm_dropout_rate_{i}', 0.1, 0.5, step=0.05))
+            for i in range(num_lstm_layers):
+                lstm_dropout_rates.append(trial.suggest_float(f'lstm_dropout_rate_{i+1}', 0.1, 0.5, step=0.05))
 
             dense_dropout_rates = []
-            for i in range(1, num_dense_layers): # No dropout after the last dense layer
-                dense_dropout_rates.append(trial.suggest_float(f'dense_dropout_rate_{i}', 0.05, 0.3, step=0.05))
+            for i in range(num_dense_layers - 1): # Dropout between dense layers
+                dense_dropout_rates.append(trial.suggest_float(f'dense_dropout_rate_{i+1}', 0.05, 0.3, step=0.05))
 
-            learning_rate = trial.suggest_float('learning_rate', 5e-5, 5e-3, log=True) # Adjusted learning rate range slightly
+            learning_rate = trial.suggest_float('learning_rate', 5e-5, 5e-3, log=True)
             bidirectional = trial.suggest_categorical('bidirectional', [True, False])
-            batch_norm = trial.suggest_categorical('batch_norm', [True, False]) # Allow optimizing batch_norm
+            batch_norm = trial.suggest_categorical('batch_norm', [True, False])
 
-
-            # Update config with suggested hyperparameters
             self.config['lstm_units'] = lstm_units
             self.config['dense_units'] = dense_units
             self.config['dropout_rates'] = lstm_dropout_rates
@@ -459,99 +470,76 @@ class LSTMHighResForecaster:
             self.config['bidirectional'] = bidirectional
             self.config['batch_norm'] = batch_norm
 
-        # --- Corrected Variable Assignment ---
-        # Retrieve hyperparameters from self.config AFTER potential update by trial
+        # Retrieve hyperparameters from self.config
         lstm_units = self.config['lstm_units']
         dense_units = self.config['dense_units']
         dropout_rates = self.config['dropout_rates']
         dense_dropout_rates = self.config['dense_dropout_rates']
-        learning_rate = self.config['learning_rate'] # Redundant, but keeps parameters grouped
+        learning_rate = self.config['learning_rate']
         bidirectional = self.config['bidirectional']
         batch_norm = self.config['batch_norm']
-        num_lstm_layers = len(lstm_units) # Re-calculate based on potentially changed list size
-        num_dense_layers = len(dense_units) # Re-calculate based on potentially changed list size
-        # --- End of Corrected Variable Assignment ---
+        num_lstm_layers = len(lstm_units)
+        num_dense_layers = len(dense_units)
 
-
-        # Build the Sequential model
         model = Sequential()
 
-        # --- Corrected Code Block for Adding LSTM Layers ---
-        # Add the first LSTM layer (requires input_shape)
+        # Add LSTM layers
         if num_lstm_layers > 0:
-            # Determine if the first layer should return sequences
             return_sequences_first = (num_lstm_layers > 1)
+            lstm_layer_instance = LSTM(units=lstm_units[0], return_sequences=return_sequences_first)
 
             if bidirectional:
-                # Add Bidirectional wrapper for the first layer, specifying input_shape in the wrapper
-                # Pass the LSTM layer instance to the Bidirectional wrapper constructor
-                model.add(Bidirectional(LSTM(units=lstm_units[0], return_sequences=return_sequences_first),
-                                        input_shape=input_shape))
+                model.add(Bidirectional(lstm_layer_instance, input_shape=input_shape))
             else:
-                # Add the first LSTM layer directly, specifying input_shape in its constructor
-                model.add(LSTM(units=lstm_units[0],
-                               return_sequences=return_sequences_first,
-                               input_shape=input_shape)) # Pass input_shape here
+                model.add(LSTM(units=lstm_units[0], return_sequences=return_sequences_first, input_shape=input_shape))
 
-
-            # Add Batch Normalization and Dropout after the first layer if configured
             if batch_norm:
                 model.add(BatchNormalization())
-
-            # Apply dropout after the first LSTM/Bidirectional layer
-            # Use dropout rate corresponding to index 0 if available, otherwise 0.0
-            dropout_rate_first = dropout_rates[0] if dropout_rates and len(dropout_rates) > 0 else 0.0
-            if dropout_rate_first > 1e-6: # Add dropout if rate is non-negligible
+            # Ensure dropout_rates is not empty before accessing index 0
+            dropout_rate_first = dropout_rates[0] if dropout_rates else 0.0
+            if dropout_rate_first > 1e-6:
                 model.add(Dropout(dropout_rate_first))
 
-
-            # Add subsequent LSTM layers (if any, they infer input shape)
             for i in range(1, num_lstm_layers):
                 is_last_lstm = (i == num_lstm_layers - 1)
-                # Create subsequent LSTM layer instance
                 subsequent_lstm_layer_instance = LSTM(units=lstm_units[i], return_sequences=not is_last_lstm)
-
                 if bidirectional:
                     model.add(Bidirectional(subsequent_lstm_layer_instance))
                 else:
                     model.add(subsequent_lstm_layer_instance)
-
-                # Add Batch Normalization and Dropout after subsequent layers
                 if batch_norm:
                     model.add(BatchNormalization())
-
-                # Apply dropout after subsequent LSTM/Bidirectional layers
-                # Use dropout rate corresponding to this layer index, or the last rate if index is out of bounds
+                # Use dropout rate corresponding to this layer index or the last rate
                 dropout_rate_subsequent = dropout_rates[i] if i < len(dropout_rates) else (dropout_rates[-1] if dropout_rates else 0.0)
-                if dropout_rate_subsequent > 1e-6: # Add dropout if rate is non-negligible
+                if dropout_rate_subsequent > 1e-6:
                     model.add(Dropout(dropout_rate_subsequent))
-
-        # --- End of Corrected Code Block for Adding LSTM Layers ---
-
 
         # Add Dense layers
         for i in range(num_dense_layers):
             model.add(Dense(dense_units[i], activation='relu'))
-
             if batch_norm:
                 model.add(BatchNormalization())
-
-            if i < num_dense_layers - 1: # No dropout after the last dense layer
-                # Use dense dropout rate corresponding to this layer index, or the last rate
+            if i < num_dense_layers - 1:
+                # Use dense dropout rate corresponding to this layer index or the last rate
                 dense_dropout_rate_current = dense_dropout_rates[i] if i < len(dense_dropout_rates) else (dense_dropout_rates[-1] if dense_dropout_rates else 0.0)
-                if dense_dropout_rate_current > 1e-6: # Add dropout if rate is non-negligible
+                if dense_dropout_rate_current > 1e-6:
                     model.add(Dropout(dense_dropout_rate_current))
-
 
         # Output layer
         model.add(Dense(1))
+
+        # --- Post-processing Layer(s) WITHIN the Keras model ---
+        # This layer ensures the *scaled* output is not negative.
+        # Using the defined function instead of a lambda
+        model.add(Lambda(clip_scaled_output, name='scaled_output_clipping'))
+        # --- End of Post-processing Layer(s) WITHIN the Keras model ---
+
 
         # Compile model
         optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
         model.compile(optimizer=optimizer, loss='mse', metrics=['mae'])
 
         return model
-
 
     def create_callbacks(self, trial=None):
         """
@@ -565,15 +553,13 @@ class LSTMHighResForecaster:
         """
         callbacks = []
 
-        # Early stopping
         early_stopping = EarlyStopping(
             monitor='val_loss',
-            patience=15, # Increased patience slightly for potentially longer training
+            patience=15,
             restore_best_weights=True
         )
         callbacks.append(early_stopping)
 
-        # Model checkpoint (only for final model, not during hyperparameter search)
         if trial is None:
             model_checkpoint = ModelCheckpoint(
                 filepath=os.path.join(self.model_dir, f'best_model_{self.timestamp}.keras'),
@@ -583,19 +569,16 @@ class LSTMHighResForecaster:
             )
             callbacks.append(model_checkpoint)
 
-        # Learning rate reduction
         reduce_lr = ReduceLROnPlateau(
             monitor='val_loss',
             factor=0.5,
-            patience=7, # Adjusted patience
-            min_lr=1e-7, # Adjusted min_lr
-            verbose=0 if trial else 1 # Less verbose during hyperparameter search
+            patience=7,
+            min_lr=1e-7,
+            verbose=0 if trial else 1
         )
         callbacks.append(reduce_lr)
 
-        # Add Optuna pruning callback if trial is provided
         if trial:
-            # Pruning is based on the validation loss
             pruning_callback = optuna.integration.TFKerasPruningCallback(
                 trial, 'val_loss'
             )
@@ -606,48 +589,25 @@ class LSTMHighResForecaster:
     def objective(self, trial, X_train_seq, y_train_seq, X_val_seq, y_val_seq):
         """
         Objective function for Optuna optimization.
-
-        Args:
-            trial: Optuna trial object
-            X_train_seq: Training sequences
-            y_train_seq: Training targets
-            X_val_seq: Validation sequences
-            y_val_seq: Validation targets
-
-        Returns:
-            Validation loss (to be minimized)
         """
-        # Clear previous TensorFlow session to free up memory
         tf.keras.backend.clear_session()
-
-        # Build model with hyperparameters from trial
         input_shape = (X_train_seq.shape[1], X_train_seq.shape[2])
         model = self.build_model(input_shape, trial)
-
-        # Create callbacks with pruning
         callbacks = self.create_callbacks(trial)
-
-        # Train model with fewer epochs for hyperparameter search (adjust as needed based on time/resources)
-        # With 10-minute data, 20 epochs might still take a while. Consider reducing if needed.
-        epochs_for_trial = 15 # Reduced epochs for faster trials
+        epochs_for_trial = 15
 
         try:
             history = model.fit(
                 X_train_seq, y_train_seq,
                 epochs=epochs_for_trial,
-                batch_size=self.batch_size, # Use the class's batch size
+                batch_size=self.batch_size,
                 validation_data=(X_val_seq, y_val_seq),
                 callbacks=callbacks,
-                verbose=0 # Silent training during hyperparameter search
+                verbose=0
             )
-
-            # Return the best validation loss reached during this trial
-            # Use min(history.history['val_loss']) in case it improved then got worse
             validation_loss = min(history.history['val_loss'])
-
         except Exception as e:
             print(f"Trial {trial.number} failed due to error: {e}")
-            # Prune the trial if it fails
             raise optuna.exceptions.TrialPruned()
 
         return validation_loss
@@ -655,46 +615,29 @@ class LSTMHighResForecaster:
     def optimize_hyperparameters(self, X_train_seq, y_train_seq, X_val_seq, y_val_seq, n_trials=50):
         """
         Optimize hyperparameters using Optuna's Bayesian optimization.
-
-        Args:
-            X_train_seq: Training sequences
-            y_train_seq: Training targets
-            X_val_seq: Validation sequences
-            y_val_seq: Validation targets
-            n_trials: Number of optimization trials
-
-        Returns:
-            Dictionary with optimized hyperparameters
         """
         print(f"\nStarting hyperparameter optimization with {n_trials} trials using Optuna...")
-
-        # Create a study object with pruning
         pruner = optuna.pruners.MedianPruner(
-            n_startup_trials=5, # Allow first few trials to run without pruning
-            n_warmup_steps=5,   # Number of steps before pruning can start in a trial
-            interval_steps=1    # Check for pruning every epoch
+            n_startup_trials=5,
+            n_warmup_steps=5,
+            interval_steps=1
         )
-
-        # Use a SQLite database to store study results, allowing continuation if interrupted
         db_path = os.path.join(self.optuna_results_dir, f'optuna_study_{self.timestamp}.db')
         study = optuna.create_study(
             direction='minimize',
             pruner=pruner,
             study_name=f'lstm_10min_study_{self.timestamp}',
-            storage=f'sqlite:///{db_path}', # Save study to database
-            load_if_exists=True # Load existing study if it exists
+            storage=f'sqlite:///{db_path}',
+            load_if_exists=True
         )
-
         print(f"Optuna study stored at: {db_path}")
         if len(study.trials) > 0:
             print(f"Loaded existing study with {len(study.trials)} trials.")
 
-        # Define the objective function
         objective_func = lambda trial: self.objective(
             trial, X_train_seq, y_train_seq, X_val_seq, y_val_seq
         )
 
-        # Run the optimization, considering already completed trials if loading from database
         remaining_trials = n_trials - len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
         if remaining_trials > 0:
             print(f"Running {remaining_trials} new optimization trials...")
@@ -702,26 +645,23 @@ class LSTMHighResForecaster:
         else:
             print("Optimization already completed for the specified number of trials.")
 
-
-        # Get best parameters
         if study.best_trial is None:
             print("No trials completed successfully.")
-            return self.config # Return default config if no best trial
+            return self.config
         else:
             best_params = study.best_params
             print("\nBest hyperparameters found:")
             for param, value in best_params.items():
                 print(f"{param}: {value}")
 
-            # Update config with best parameters from the study
-            # Need to extract list parameters based on the number of layers found
-            num_lstm_layers = best_params.get('num_lstm_layers', len(self.config['lstm_units'])) # Use default if not in best_params (e.g. if load_if_exists)
+            # Update config with best parameters
+            num_lstm_layers = best_params.get('num_lstm_layers', len(self.config['lstm_units']))
             num_dense_layers = best_params.get('num_dense_layers', len(self.config['dense_units']))
 
             lstm_units = [best_params[f'lstm_units_{i+1}'] for i in range(num_lstm_layers) if f'lstm_units_{i+1}' in best_params]
             dense_units = [best_params[f'dense_units_{i+1}'] for i in range(num_dense_layers) if f'dense_units_{i+1}' in best_params]
             lstm_dropout_rates = [best_params[f'lstm_dropout_rate_{i+1}'] for i in range(num_lstm_layers) if f'lstm_dropout_rate_{i+1}' in best_params]
-            dense_dropout_rates = [best_params[f'dense_dropout_rate_{i+1}'] for i in range(num_dense_layers - 1) if f'dense_dropout_rate_{i+1}' in best_params] # Note: dense_dropout_rate is for intermediate layers
+            dense_dropout_rates = [best_params[f'dense_dropout_rate_{i+1}'] for i in range(num_dense_layers - 1) if f'dense_dropout_rate_{i+1}'] # Note: dense_dropout_rate is for intermediate layers
 
             self.config['lstm_units'] = lstm_units if lstm_units else self.config['lstm_units']
             self.config['dense_units'] = dense_units if dense_units else self.config['dense_units']
@@ -731,107 +671,131 @@ class LSTMHighResForecaster:
             self.config['bidirectional'] = best_params.get('bidirectional', self.config['bidirectional'])
             self.config['batch_norm'] = best_params.get('batch_norm', self.config['batch_norm'])
 
-
-            # Save hyperparameter search results plots
             try:
-                self.plot_optuna_results(study)
+                # Optuna plotting requires specific dependencies (e.g., matplotlib, plotly)
+                # Ensure these are installed if you want the plots
+                from optuna.visualization import plot_optimization_history, plot_param_importances
+                print("Generating Optuna plots...")
+                fig_history = plot_optimization_history(study)
+                fig_history.write_image(os.path.join(self.optuna_results_dir, f'optimization_history_{self.timestamp}.png'))
+                fig_importance = plot_param_importances(study)
+                fig_importance.write_image(os.path.join(self.optuna_results_dir, f'param_importances_{self.timestamp}.png'))
+                print("Optuna plots saved.")
+            except ImportError:
+                print("Warning: Optuna visualization dependencies (matplotlib, plotly) not found. Skipping plot generation.")
             except Exception as e:
                 print(f"Warning: Could not generate Optuna plots. Error: {e}")
 
 
-            # Save best parameters to file
             best_params_path = os.path.join(self.model_dir, f'best_params_{self.timestamp}.txt')
             with open(best_params_path, 'w', encoding='utf-8') as f:
                 f.write("Optimized Hyperparameters:\n")
-                for param, value in self.config.items(): # Save the config dict after updating it
+                for param, value in self.config.items():
                     f.write(f"{param}: {value}\n")
             print(f"Best hyperparameters saved to {best_params_path}")
 
-            return self.config # Return the updated config
+            return self.config
 
-    def plot_optuna_results(self, study):
+    def apply_zero_radiation_postprocessing(self, y_pred_scaled_raw: np.ndarray, original_test_df_slice: pd.DataFrame, radiation_column: str, target_scaler: MinMaxScaler) -> np.ndarray:
         """
-        Plot and save Optuna optimization results.
+        Applies post-processing: sets predicted power to 0 if future Global Radiation is 0.
 
         Args:
-            study: Optuna study object
+            y_pred_scaled_raw: Raw predictions from the model (scaled), shape (n_predictions, 1).
+            original_test_df_slice: The original (unscaled) DataFrame slice used for the test set,
+                                    starting from the first timestamp the model predicts for.
+                                    Must be aligned with y_pred_scaled_raw.
+            radiation_column: The name of the Global Radiation column in original_test_df_slice.
+            target_scaler: The scaler used for the target variable, needed to transform 0 back to scaled space.
+
+        Returns:
+            Post-processed predictions (scaled), shape (n_predictions, 1).
         """
-        print(f"Saving Optuna visualization plots to {self.optuna_results_dir}/")
+        print("\nApplying zero radiation post-processing...")
 
-        # Plot optimization history
-        try:
-            fig1 = optuna.visualization.plot_optimization_history(study)
-            fig1.write_image(os.path.join(self.optuna_results_dir, f'optimization_history_{self.timestamp}.png'))
-            # fig1.show() # Uncomment to show interactively if needed
-        except Exception as e:
-            print(f"Warning: Could not plot optimization history. Error: {e}")
+        if radiation_column not in original_test_df_slice.columns:
+            print(f"Warning: Radiation column '{radiation_column}' not found in original test data for post-processing.")
+            return y_pred_scaled_raw.copy() # Return a copy of raw predictions if radiation data is missing
 
-        # Plot parameter importances
-        try:
-            fig2 = optuna.visualization.plot_param_importances(study)
-            fig2.write_image(os.path.join(self.optuna_results_dir, f'param_importances_{self.timestamp}.png'))
-            # fig2.show()
-        except Exception as e:
-            print(f"Warning: Could not plot parameter importances. Error: {e}")
+        # Ensure lengths match - y_pred_scaled_raw should have the same number of predictions
+        # as rows in original_test_df_slice if sliced correctly in evaluate_model.
+        if len(y_pred_scaled_raw) != len(original_test_df_slice):
+             print(f"Warning: Length mismatch between predictions ({len(y_pred_scaled_raw)}) and original test data slice ({len(original_test_df_slice)}). Skipping zero radiation post-processing.")
+             return y_pred_scaled_raw.copy() # Return a copy of raw predictions
 
-        # Plot parallel coordinate plot (can be slow/complex for many trials/params)
-        try:
-            fig3 = optuna.visualization.plot_parallel_coordinate(study)
-            fig3.write_image(os.path.join(self.optuna_results_dir, f'parallel_coordinate_{self.timestamp}.png'))
-            # fig3.show()
-        except Exception as e:
-            print(f"Warning: Could not plot parallel coordinate. Error: {e}")
+        # Create a boolean mask where Global Radiation is zero (or very close to zero)
+        # at the prediction timestamps in the original test data.
+        # Use a small threshold to account for floating point issues if necessary.
+        RADIATION_THRESHOLD = 1.0 # W/m² - Adjust this threshold as needed
+        zero_radiation_mask = (original_test_df_slice[radiation_column] < RADIATION_THRESHOLD)
 
-        # Plot slice plots for key hyperparameters that exist in the study
-        # Get all parameter names from the study
-        study_params = list(study.best_params.keys())
-        plottable_params = [p for p in study_params if 'units' in p or 'rate' in p or 'learning_rate' in p or p in ['num_lstm_layers', 'num_dense_layers', 'bidirectional', 'batch_norm']]
+        # Get the scaled value for zero power
+        # This assumes the target scaler maps 0W to a specific scaled value (often 0)
+        scaled_zero_value = target_scaler.transform([[0.0]])[0][0] # Transform 0W to scaled value
 
-        for param in plottable_params:
-            try:
-                fig = optuna.visualization.plot_slice(study, params=[param])
-                fig.write_image(os.path.join(self.optuna_results_dir, f'slice_{param}_{self.timestamp}.png'))
-                # fig.show()
-            except Exception as e:
-                print(f"Warning: Could not plot slice for {param}. Error: {e}")
+        # Apply the post-processing: set prediction to scaled_zero_value where radiation is zero
+        y_pred_scaled_postprocessed = y_pred_scaled_raw.copy() # Work on a copy
+        # Apply the mask. The mask needs to be reshaped to match the prediction shape (n_predictions, 1)
+        y_pred_scaled_postprocessed[zero_radiation_mask.values.reshape(-1, 1)] = scaled_zero_value
+
+        print(f"Applied zero radiation post-processing to {zero_radiation_mask.sum()} predictions.")
+
+        return y_pred_scaled_postprocessed
 
 
-    def evaluate_model(self, model, X_test_seq, y_test, target_scaler=None):
+    def evaluate_model(self, model, X_test_seq, y_test_scaled, original_test_df_slice, target_scaler, feature_info):
         """
-        Evaluate the model and return metrics.
+        Evaluate the model and return metrics using post-processed predictions.
 
         Args:
             model: Trained LSTM model
-            X_test_seq: Test sequences
-            y_test: True target values (scaled)
-            target_scaler: Scaler for the target variable (optional, to get original scale metrics)
+            X_test_seq: Test sequences.
+            y_test_scaled: True target values (scaled).
+            original_test_df_slice: The original (unscaled) DataFrame slice corresponding to the predictions.
+                                    Needed for post-processing rules based on original features.
+                                    Must be aligned with y_pred_scaled_raw.
+            target_scaler: Scaler for the target variable (needed for inverse transform).
+            feature_info: Dictionary with feature information (to get radiation column name).
+
 
         Returns:
-            Dictionary of evaluation metrics and actual/predicted values
+            Dictionary of evaluation metrics and actual/predicted values.
         """
         print("\nMaking predictions on the test set...")
-        y_pred = model.predict(X_test_seq)
+        # Get raw scaled predictions from the model
+        y_pred_scaled_raw = model.predict(X_test_seq)
 
-        # Ensure y_test and y_pred have the same shape (e.g., (n_samples, 1))
-        y_test = y_test.reshape(-1, 1)
-        y_pred = y_pred.reshape(-1, 1)
+        # Ensure y_test_scaled and y_pred_scaled_raw have the same shape (e.g., (n_samples, 1))
+        y_test_scaled = y_test_scaled.reshape(-1, 1)
+        y_pred_scaled_raw = y_pred_scaled_raw.reshape(-1, 1)
 
-        # Calculate metrics on scaled data
-        mse_scaled = mean_squared_error(y_test, y_pred)
+        # --- Apply Post-processing ---
+        # Get the radiation column name from feature_info
+        radiation_col_name = 'GlobalRadiation [W m-2]' # Assuming this is the correct name as used in features
+        # You might want to verify this column is actually in original_test_df_slice
+
+        y_pred_scaled_postprocessed = self.apply_zero_radiation_postprocessing(
+            y_pred_scaled_raw,
+            original_test_df_slice,
+            radiation_col_name,
+            target_scaler # Pass target_scaler to get the scaled zero value
+        )
+        # --- End of Post-processing ---
+
+
+        # Calculate metrics on SCALED data using POST-PROCESSED predictions
+        mse_scaled = mean_squared_error(y_test_scaled, y_pred_scaled_postprocessed)
         rmse_scaled = np.sqrt(mse_scaled)
-        mae_scaled = mean_absolute_error(y_test, y_pred)
-        r2_scaled = r2_score(y_test, y_pred)
+        mae_scaled = mean_absolute_error(y_test_scaled, y_pred_scaled_postprocessed)
+        r2_scaled = r2_score(y_test_scaled, y_pred_scaled_postprocessed)
 
-        # Calculate MAPE (Mean Absolute Percentage Error) for scaled data
-        # Avoid division by zero or very small numbers
-        epsilon = 1e-8 # Small constant to avoid division by zero
-        mape_scaled = np.mean(np.abs((y_test - y_pred) / (y_test + epsilon))) * 100
+        # Recalculate MAPE and SMAPE using postprocessed scaled predictions
+        epsilon = 1e-8
+        mape_scaled = np.mean(np.abs((y_test_scaled - y_pred_scaled_postprocessed) / (y_test_scaled + epsilon))) * 100
+        smape_scaled = np.mean(2.0 * np.abs(y_pred_scaled_postprocessed - y_test_scaled) / (np.abs(y_pred_scaled_postprocessed) + np.abs(y_test_scaled) + epsilon)) * 100
 
-        # Calculate SMAPE (Symmetric Mean Absolute Percentage Error) for scaled data
-        # This metric is symmetric and handles zero values better
-        smape_scaled = np.mean(2.0 * np.abs(y_pred - y_test) / (np.abs(y_pred) + np.abs(y_test) + epsilon)) * 100
 
-        print("\nModel Evaluation (Scaled):")
+        print("\nModel Evaluation (Scaled, Post-processed):")
         print(f"Mean Squared Error (MSE): {mse_scaled:.6f}")
         print(f"Root Mean Squared Error (RMSE): {rmse_scaled:.6f}")
         print(f"Mean Absolute Error (MAE): {mae_scaled:.6f}")
@@ -839,61 +803,152 @@ class LSTMHighResForecaster:
         print(f"Symmetric Mean Absolute Percentage Error (SMAPE): {smape_scaled:.2f}%")
         print(f"R² Score: {r2_scaled:.4f}")
 
-
         results = {
-            'mse_scaled': mse_scaled,
-            'rmse_scaled': rmse_scaled,
-            'mae_scaled': mae_scaled,
-            'mape_scaled': mape_scaled,
-            'smape_scaled': smape_scaled,
-            'r2_scaled': r2_scaled,
-            'y_test_scaled': y_test,
-            'y_pred_scaled': y_pred
+            'mse_scaled_postprocessed': mse_scaled,
+            'rmse_scaled_postprocessed': rmse_scaled,
+            'mae_scaled_postprocessed': mae_scaled,
+            'mape_scaled_postprocessed': mape_scaled,
+            'smape_scaled_postprocessed': smape_scaled,
+            'r2_scaled_postprocessed': r2_scaled,
+            'y_test_scaled': y_test_scaled,
+            'y_pred_scaled_raw': y_pred_scaled_raw, # Keep raw predictions for comparison if needed
+            'y_pred_scaled_postprocessed': y_pred_scaled_postprocessed
         }
 
-        # If target scaler is provided, inverse transform predictions and true values
-        if target_scaler:
-            y_test_inv = target_scaler.inverse_transform(y_test)
-            y_pred_inv = target_scaler.inverse_transform(y_pred)
-
-            # Calculate metrics on original scale
-            mse = mean_squared_error(y_test_inv, y_pred_inv)
-            rmse = np.sqrt(mse)
-            mae = mean_absolute_error(y_test_inv, y_pred_inv)
-            r2 = r2_score(y_test_inv, y_pred_inv)
-
-            # Calculate MAPE and SMAPE on original scale
-            # Avoid division by zero or very small numbers
-            epsilon = 1e-8 # Small constant to avoid division by zero
-            mape = np.mean(np.abs((y_test_inv - y_pred_inv) / (y_test_inv + epsilon))) * 100
-            smape = np.mean(2.0 * np.abs(y_pred_inv - y_test_inv) / (np.abs(y_pred_inv) + np.abs(y_pred_inv) + epsilon)) * 100
+        # Inverse transform original test values and POST-PROCESSED predictions
+        y_test_inv = target_scaler.inverse_transform(y_test_scaled)
+        y_pred_inv_postprocessed = target_scaler.inverse_transform(y_pred_scaled_postprocessed)
 
 
-            print("\nModel Evaluation (Original Scale):")
-            print(f"Mean Squared Error (MSE): {mse:.2f}")
-            print(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
-            print(f"Mean Absolute Error (MAE): {mae:.2f}")
-            print(f"Mean Absolute Percentage Error (MAPE): {mape:.2f}%")
-            print(f"Symmetric Mean Absolute Percentage Error (SMAPE): {smape:.2f}%")
-            print(f"R² Score: {r2:.4f}")
+        # Calculate metrics on ORIGINAL scale using POST-PROCESSED predictions
+        mse_postprocessed = mean_squared_error(y_test_inv, y_pred_inv_postprocessed)
+        rmse_postprocessed = np.sqrt(mse_postprocessed)
+        mae_postprocessed = mean_absolute_error(y_test_inv, y_pred_inv_postprocessed)
+        r2_postprocessed = r2_score(y_test_inv, y_pred_inv_postprocessed)
+
+        # Calculate MAPE and SMAPE on original scale using POST-PROCESSED predictions
+        epsilon = 1e-8
+        mape_postprocessed = np.mean(np.abs((y_test_inv - y_pred_inv_postprocessed) / (y_test_inv + epsilon))) * 100
+        smape_postprocessed = np.mean(2.0 * np.abs(y_pred_inv_postprocessed - y_test_inv) / (np.abs(y_pred_inv_postprocessed) + np.abs(y_test_inv) + epsilon)) * 100
+
+
+        print("\nModel Evaluation (Original Scale, Post-processed):")
+        print(f"Mean Squared Error (MSE): {mse_postprocessed:.2f}")
+        print(f"Root Mean Squared Error (RMSE): {rmse_postprocessed:.2f}")
+        print(f"Mean Absolute Error (MAE): {mae_postprocessed:.2f}")
+        print(f"Mean Absolute Percentage Error (MAPE): {mape_postprocessed:.2f}%")
+        print(f"Symmetric Mean Absolute Percentage Error (SMAPE): {smape_postprocessed:.2f}%")
+        print(f"R² Score: {r2_postprocessed:.4f}")
+
+        results.update({
+            'mse_postprocessed': mse_postprocessed,
+            'rmse_postprocessed': rmse_postprocessed,
+            'mae_postprocessed': mae_postprocessed,
+            'mape_postprocessed': mape_postprocessed,
+            'smape_postprocessed': smape_postprocessed,
+            'r2_postprocessed': r2_postprocessed,
+            'y_test_inv': y_test_inv,
+            'y_pred_inv_postprocessed': y_pred_inv_postprocessed # Store post-processed inverse predictions
+        })
+
+        # Optionally, calculate and store raw metrics (before post-processing) for comparison
+        # This requires inverse transforming the raw scaled predictions
+        try:
+            y_pred_inv_raw = target_scaler.inverse_transform(y_pred_scaled_raw)
+            mse_raw = mean_squared_error(y_test_inv, y_pred_inv_raw)
+            rmse_raw = np.sqrt(mse_raw)
+            mae_raw = mean_absolute_error(y_test_inv, y_pred_inv_raw)
+            r2_raw = r2_score(y_test_inv, y_pred_inv_raw)
+
+            epsilon = 1e-8
+            mape_raw = np.mean(np.abs((y_test_inv - y_pred_inv_raw) / (y_test_inv + epsilon))) * 100
+            smape_raw = np.mean(2.0 * np.abs(y_pred_inv_raw - y_test_inv) / (np.abs(y_pred_inv_raw) + np.abs(y_test_inv) + epsilon)) * 100
+
+            print("\nModel Evaluation (Original Scale, Raw):")
+            print(f"Mean Squared Error (MSE): {mse_raw:.2f}")
+            print(f"Root Mean Squared Error (RMSE): {rmse_raw:.2f}")
+            print(f"Mean Absolute Error (MAE): {mae_raw:.2f}")
+            print(f"Mean Absolute Percentage Error (MAPE): {mape_raw:.2f}%")
+            print(f"Symmetric Mean Absolute Percentage Error (SMAPE): {smape_raw:.2f}%")
+            print(f"R² Score: {r2_raw:.4f}")
 
             results.update({
-                'mse': mse,
-                'rmse': rmse,
-                'mae': mae,
-                'mape': mape,
-                'smape': smape,
-                'r2': r2,
-                'y_test_inv': y_test_inv,
-                'y_pred_inv': y_pred_inv
+                'mse_raw': mse_raw,
+                'rmse_raw': rmse_raw,
+                'mae_raw': mae_raw,
+                'mape_raw': mape_raw,
+                'smape_raw': smape_raw,
+                'r2_raw': r2_raw,
+                'y_pred_inv_raw': y_pred_inv_raw # Store raw inverse predictions
             })
+        except Exception as e:
+             print(f"Warning: Could not calculate raw metrics: {e}")
+             # Handle cases where inverse transform might fail or data is empty
 
         return results
+
+    def save_model_summary(self, model, feature_info, evaluation_results, data_path):
+        """
+        Saves a summary of the model architecture, configuration, and evaluation results.
+        """
+        summary_path = os.path.join(self.model_dir, f'model_summary_{self.timestamp}.txt')
+        with open(summary_path, 'w', encoding='utf-8') as f:
+            f.write(f"Model Summary - Timestamp: {self.timestamp}\n")
+            f.write("-" * 30 + "\n")
+            f.write("Input Data:\n")
+            f.write(f"  Data Path: {data_path}\n")
+            f.write(f"  Sequence Length: {self.sequence_length}\n")
+            f.write(f"  Features Used: {feature_info['all_features']}\n")
+            f.write("-" * 30 + "\n")
+            f.write("Model Configuration:\n")
+            for key, value in self.config.items():
+                f.write(f"  {key}: {value}\n")
+            f.write("-" * 30 + "\n")
+            f.write("Model Architecture:\n")
+            model.summary(print_fn=lambda x: f.write(x + '\n'))
+            f.write("-" * 30 + "\n")
+            f.write("Evaluation Results (Test Set):\n")
+            # Print post-processed metrics if available, otherwise raw metrics
+            if 'rmse_postprocessed' in evaluation_results:
+                f.write("  Metrics (Post-processed, Original Scale):\n")
+                f.write(f"    RMSE: {evaluation_results['rmse_postprocessed']:.2f}\n")
+                f.write(f"    MAE: {evaluation_results['mae_postprocessed']:.2f}\n")
+                f.write(f"    MAPE: {evaluation_results['mape_postprocessed']:.2f}%\n")
+                f.write(f"    SMAPE: {evaluation_results['smape_postprocessed']:.2f}%\n")
+                f.write(f"    R²: {evaluation_results['r2_postprocessed']:.4f}\n")
+            elif 'rmse_raw' in evaluation_results:
+                 f.write("  Metrics (Raw, Original Scale):\n")
+                 f.write(f"    RMSE: {evaluation_results['rmse_raw']:.2f}\n")
+                 f.write(f"    MAE: {evaluation_results['mae_raw']:.2f}\n")
+                 f.write(f"    MAPE: {evaluation_results['mape_raw']:.2f}%\n")
+                 f.write(f"    SMAPE: {evaluation_results['smape_raw']:.2f}%\n")
+                 f.write(f"    R²: {evaluation_results['r2_raw']:.4f}\n")
+            else:
+                 f.write("  Metrics (Scaled Raw Fallback):\n")
+                 f.write(f"    RMSE: {evaluation_results['rmse_scaled']:.6f}\n")
+                 f.write(f"    MAE: {evaluation_results['mae_scaled']:.6f}\n")
+                 f.write(f"    MAPE: {evaluation_results['mape_scaled']:.2f}%\n")
+                 f.write(f"    SMAPE: {evaluation_results['smape_scaled']:.2f}%\n")
+                 f.write(f"    R²: {evaluation_results['r2_scaled']:.4f}\n")
+
+            f.write("-" * 30 + "\n")
+            f.write(f"Scalers saved to: {self.model_dir}/*_scaler_{self.timestamp}.pkl\n")
+            f.write(f"Best model saved to: {self.model_dir}/best_model_{self.timestamp}.keras\n")
+            f.write(f"Results plots saved to: {self.results_dir}/lstm_10min_*{self.timestamp}.png\n")
+            if os.path.exists(os.path.join(self.optuna_results_dir, f'optuna_study_{self.timestamp}.db')):
+                 f.write(f"Optuna study database: {self.optuna_results_dir}/optuna_study_{self.timestamp}.db\n")
+                 # Also list plot files if they were generated
+                 if os.path.exists(os.path.join(self.optuna_results_dir, f'optimization_history_{self.timestamp}.png')):
+                     f.write(f"Optuna plots saved to: {self.optuna_results_dir}/*_{self.timestamp}.png\n")
+
+
+        print(f"\nModel summary saved to {summary_path}")
 
 
     def plot_results(self, history, evaluation_results):
         """
         Plot and save training history and prediction results.
+        Plots post-processed predictions if available.
 
         Args:
             history: Training history object
@@ -922,88 +977,103 @@ class LSTMHighResForecaster:
 
         plt.tight_layout()
         plt.savefig(os.path.join(self.results_dir, f'lstm_10min_history_{self.timestamp}.png'))
-        plt.close() # Close plot to free memory
+        plt.close()
 
 
-        # Check if we have inverse-transformed data for original scale plots
-        has_inverse_transform = 'y_test_inv' in evaluation_results
+        # Determine which predictions to plot on scaled plots (post-processed is preferred)
+        y_pred_scaled_to_plot = evaluation_results.get('y_pred_scaled_postprocessed', evaluation_results.get('y_pred_scaled_raw')) # Use get with default None or raw
+        if y_pred_scaled_to_plot is None:
+             print("Error: No scaled predictions available for plotting.")
+             return # Exit plot function if no predictions
+
+        plot_title_suffix_scaled = ' (Scaled, Post-processed)' if 'y_pred_scaled_postprocessed' in evaluation_results else ' (Scaled, Raw)'
+
 
         # Plot predictions vs actual (scaled) - Sample a smaller portion for clarity if needed
         plt.figure(figsize=(14, 7))
 
-        sample_size = min(1000, len(evaluation_results['y_test_scaled'])) # Sample size for plotting
+        sample_size = min(20000, len(evaluation_results['y_test_scaled']))
         indices = np.arange(sample_size)
 
         plt.plot(indices, evaluation_results['y_test_scaled'][:sample_size], 'b-', label='Actual (Scaled)')
-        plt.plot(indices, evaluation_results['y_pred_scaled'][:sample_size], 'r-', label='Predicted (Scaled)')
-        plt.title(f'Actual vs Predicted PV Power (Scaled) - Sample ({sample_size} points)')
+        # Update label based on whether post-processing was applied
+        pred_label_scaled = 'Predicted (Scaled, Post-processed)' if 'y_pred_scaled_postprocessed' in evaluation_results else 'Predicted (Scaled, Raw)'
+        plt.plot(indices, y_pred_scaled_to_plot[:sample_size], 'r-', label=pred_label_scaled)
+        plt.title(f'Actual vs Predicted PV Power{plot_title_suffix_scaled} - Sample ({sample_size} points)')
         plt.xlabel(f'Time Steps ({self.sequence_length}-step lookback)')
         plt.ylabel('Power Output (Scaled)')
         plt.legend()
         plt.grid(True)
 
         plt.savefig(os.path.join(self.results_dir, f'lstm_10min_predictions_scaled_{self.timestamp}.png'))
-        plt.close() # Close plot
+        plt.close()
 
 
-        # If we have inverse-transformed data, plot on original scale
-        if has_inverse_transform:
-            # Plot predictions vs actual (original scale)
-            plt.figure(figsize=(14, 7))
+        # Determine which inverse-transformed predictions to plot (post-processed is preferred)
+        y_pred_inv_to_plot = evaluation_results.get('y_pred_inv_postprocessed', evaluation_results.get('y_pred_inv_raw')) # Use get with default None or raw inverse
+        if y_pred_inv_to_plot is None:
+             print("Warning: No inverse-transformed predictions available for plotting on original scale.")
+             # Still try to plot scaled scatter if no inverse data at all
+             if 'y_test_scaled' in evaluation_results and 'y_pred_scaled_to_plot' in locals(): # Check if scaled data is available
+                 plt.figure(figsize=(10, 8))
+                 scatter_sample_size = min(5000, len(evaluation_results['y_test_scaled']))
+                 scatter_indices = np.random.choice(len(evaluation_results['y_test_scaled']), scatter_sample_size, replace=False)
 
-            # Use the same sample size and indices as scaled plot
-            plt.plot(indices, evaluation_results['y_test_inv'][:sample_size], 'b-', label='Actual Power Output')
-            plt.plot(indices, evaluation_results['y_pred_inv'][:sample_size], 'r-', label='Predicted Power Output')
-            plt.title(f'Actual vs Predicted PV Power (W) - Sample ({sample_size} points)')
-            plt.xlabel(f'Time Steps ({self.sequence_length}-step lookback)')
-            plt.ylabel('Power Output (W)')
-            plt.legend()
-            plt.grid(True)
+                 plt.scatter(evaluation_results['y_test_scaled'][scatter_indices], y_pred_scaled_to_plot[scatter_indices], alpha=0.5, s=5)
+                 max_val = max(evaluation_results['y_test_scaled'].max(), y_pred_scaled_to_plot.max())
+                 min_val = min(evaluation_results['y_test_scaled'].min(), y_pred_scaled_to_plot.min())
+                 plt.plot([min_val, max_val], [min_val, max_val], 'r--', lw=2)
 
-            plt.savefig(os.path.join(self.results_dir, f'lstm_10min_predictions_{self.timestamp}.png'))
-            plt.close() # Close plot
+                 plt.title(f'Actual vs Predicted (Scaled) - Scatter Plot ({scatter_sample_size} points sampled)')
+                 plt.xlabel('Actual Power Output (Scaled)')
+                 plt.ylabel('Predicted Power Output (Scaled)')
+                 plt.grid(True)
+                 plt.axis('equal')
+                 plt.gca().set_aspect('equal', adjustable='box')
 
-            # Create scatter plot (original scale)
-            plt.figure(figsize=(10, 8))
-            # Use a smaller sample size for scatter plot if the test set is very large
-            scatter_sample_size = min(5000, len(evaluation_results['y_test_inv']))
-            scatter_indices = np.random.choice(len(evaluation_results['y_test_inv']), scatter_sample_size, replace=False) # Sample randomly
+                 plt.savefig(os.path.join(self.results_dir, f'lstm_10min_scatter_scaled_{self.timestamp}.png'))
+                 plt.close()
+             return # Exit plot function if no inverse transformed data
 
-            plt.scatter(evaluation_results['y_test_inv'][scatter_indices], evaluation_results['y_pred_inv'][scatter_indices], alpha=0.5, s=5) # Reduced marker size
-            # Plot a diagonal line for reference
-            max_val = max(evaluation_results['y_test_inv'].max(), evaluation_results['y_pred_inv'].max())
-            min_val = min(evaluation_results['y_test_inv'].min(), evaluation_results['y_test_inv'].min())
-            plt.plot([min_val, max_val], [min_val, max_val], 'r--', lw=2)
+        # Plot predictions vs actual (original scale)
+        plt.figure(figsize=(14, 7))
 
-            plt.title(f'Actual vs Predicted PV Power (W) - Scatter Plot ({scatter_sample_size} points sampled)')
-            plt.xlabel('Actual Power Output (W)')
-            plt.ylabel('Predicted Power Output (W)')
-            plt.grid(True)
-            plt.axis('equal') # Ensure aspect ratio is equal
-            plt.gca().set_aspect('equal', adjustable='box') # Alternative way to ensure equal aspect ratio
+        sample_size_inv = min(1000, len(evaluation_results['y_test_inv']))
+        indices_inv = np.arange(sample_size_inv)
 
-            plt.savefig(os.path.join(self.results_dir, f'lstm_10min_scatter_{self.timestamp}.png'))
-            plt.close() # Close plot
-        else:
-            # Create scatter plot (scaled) if original scale data is not available
-            plt.figure(figsize=(10, 8))
-            scatter_sample_size = min(5000, len(evaluation_results['y_test_scaled']))
-            scatter_indices = np.random.choice(len(evaluation_results['y_test_scaled']), scatter_sample_size, replace=False)
+        plt.plot(indices_inv, evaluation_results['y_test_inv'][:sample_size_inv], 'b-', label='Actual Power Output')
+        # Update label based on whether post-processing was applied
+        pred_label_inv = 'Predicted Power Output (Post-processed)' if 'y_pred_inv_postprocessed' in evaluation_results else 'Predicted Power Output (Raw)'
+        plt.plot(indices_inv, y_pred_inv_to_plot[:sample_size_inv], 'r-', label=pred_label_inv)
+        plt.title(f'Actual vs Predicted PV Power (W) - Sample ({sample_size_inv} points)')
+        plt.xlabel(f'Time Steps ({self.sequence_length}-step lookback)')
+        plt.ylabel('Power Output (W)')
+        plt.legend()
+        plt.grid(True)
 
-            plt.scatter(evaluation_results['y_test_scaled'][scatter_indices], evaluation_results['y_pred_scaled'][scatter_indices], alpha=0.5, s=5)
-            max_val = max(evaluation_results['y_test_scaled'].max(), evaluation_results['y_pred_scaled'].max())
-            min_val = min(evaluation_results['y_test_scaled'].min(), evaluation_results['y_test_scaled'].min())
-            plt.plot([min_val, max_val], [min_val, max_val], 'r--', lw=2)
+        plt.savefig(os.path.join(self.results_dir, f'lstm_10min_predictions_{self.timestamp}.png'))
+        plt.close()
 
-            plt.title(f'Actual vs Predicted (Scaled) - Scatter Plot ({scatter_sample_size} points sampled)')
-            plt.xlabel('Actual Power Output (Scaled)')
-            plt.ylabel('Predicted Power Output (Scaled)')
-            plt.grid(True)
-            plt.axis('equal')
-            plt.gca().set_aspect('equal', adjustable='box')
+        # Create scatter plot (original scale)
+        plt.figure(figsize=(10, 8))
+        scatter_sample_size = min(5000, len(evaluation_results['y_test_inv']))
+        scatter_indices = np.random.choice(len(evaluation_results['y_test_inv']), scatter_sample_size, replace=False)
 
-            plt.savefig(os.path.join(self.results_dir, f'lstm_10min_scatter_scaled_{self.timestamp}.png'))
-            plt.close() # Close plot
+        # Update scatter label based on whether post-processing was applied
+        plt.scatter(evaluation_results['y_test_inv'][scatter_indices], y_pred_inv_to_plot[scatter_indices], alpha=0.5, s=5, label=pred_label_inv)
+        max_val = max(evaluation_results['y_test_inv'].max(), y_pred_inv_to_plot.max())
+        min_val = min(evaluation_results['y_test_inv'].min(), y_pred_inv_to_plot.min())
+        plt.plot([min_val, max_val], [min_val, max_val], 'r--', lw=2)
+
+        plt.title(f'Actual vs Predicted PV Power (W) - Scatter Plot ({scatter_sample_size} points sampled)')
+        plt.xlabel('Actual Power Output (W)')
+        plt.ylabel('Predicted Power Output (W)')
+        plt.grid(True)
+        plt.axis('equal')
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.legend() # Add legend to scatter plot
+        plt.savefig(os.path.join(self.results_dir, f'lstm_10min_scatter_{self.timestamp}.png'))
+        plt.close()
 
         print("Plots saved.")
 
@@ -1022,27 +1092,39 @@ class LSTMHighResForecaster:
         """
         print(f"Running LSTM forecasting pipeline for high-resolution (10-minute) data from {data_path}")
 
-        # Load data
+        # --- Data Loading and Preparation ---
+        # Load the raw data
         df = self.load_data(data_path)
 
-        # Create time features (assuming they are not already in the raw data)
-        # Ensure this is done BEFORE prepare_features
-        df = self.create_time_features(df)
+        # Create time features (assuming they are not already in the raw parquet)
+        print("\nCreating time-based and cyclical features...")
+        df['day_sin'] = np.sin(2 * np.pi * df.index.dayofyear / 365.0)
+        df['day_cos'] = np.cos(2 * np.pi * df.index.dayofyear / 365.0)
+        df['time_of_day_hours'] = df.index.hour + df.index.minute / 60.0
+        df['time_of_day_sin'] = np.sin(2 * np.pi * df['time_of_day_hours'] / 24.0)
+        df['time_of_day_cos'] = np.cos(2 * np.pi * df['time_of_day_hours'] / 24.0)
+        # Assuming 'GlobalRadiation [W m-2]' exists for isNight check/feature
+        radiation_col_name = 'GlobalRadiation [W m-2]'
+        if radiation_col_name in df.columns:
+             df['isNight'] = (df[radiation_col_name] < 1.0).astype(int) # Using a small threshold
+        else:
+             df['isNight'] = 0 # Placeholder if radiation is missing
 
 
-        # Prepare features
+        # Prepare features (defines which columns to use and how to scale)
         feature_info = self.prepare_features(df)
 
-        # Split and scale data
+        # Split and scale data (applies scalers and creates splits, returns original test_df)
+        # The original_test_df is needed for post-processing checks based on original feature values
         data = self.split_and_scale_data(df, feature_info)
 
-        # Clear original dataframe to free memory after splitting/scaling
+        # Clear original dataframe after splitting/scaling
         del df
+        # --- End of Data Loading and Preparation ---
 
 
-        # Create sequences
-        # Note: The sequence_length is defined in __init__ (default 144 for 24 hours)
-        print(f"\nCreating sequences with sequence length: {self.sequence_length} ({self.sequence_length*10/60:.2f} hours lookback)")
+        # Create sequences for model input
+        print(f"\nCreating sequences with sequence length: {self.sequence_length} steps ({self.sequence_length*10/60:.2f} hours lookback)")
 
         X_train_seq, y_train_seq = self.create_sequences(
             data['X_train'], data['y_train'], self.sequence_length
@@ -1050,7 +1132,9 @@ class LSTMHighResForecaster:
         X_val_seq, y_val_seq = self.create_sequences(
             data['X_val'], data['y_val'], self.sequence_length
         )
-        X_test_seq, y_test_seq = self.create_sequences(
+        # Note: X_test_seq and y_test_scaled are created for model input and evaluation
+        # y_test_scaled here represents the true target values, scaled.
+        X_test_seq, y_test_scaled = self.create_sequences(
             data['X_test'], data['y_test'], self.sequence_length
         )
 
@@ -1058,27 +1142,23 @@ class LSTMHighResForecaster:
         print(f"Validation sequences shape: {X_val_seq.shape}")
         print(f"Testing sequences shape: {X_test_seq.shape}")
 
+
         # Perform hyperparameter optimization if requested
         if optimize_hyperparams:
             print("\nPerforming hyperparameter optimization...")
-            # Optimization will update self.config with the best parameters found
             self.optimize_hyperparameters(
                 X_train_seq, y_train_seq, X_val_seq, y_val_seq, n_trials=n_trials
             )
             print(f"\nOptimized hyperparameters loaded into configuration.")
-
         else:
             print("\nHyperparameter optimization skipped. Using default or previously loaded configuration.")
-            # If not optimizing, ensure a config exists (e.g., load from file or use default)
-            # For this script, default config is already initialized
 
 
-        # Build final model using the current config (either default or optimized)
+        # Build final model
         input_shape = (X_train_seq.shape[1], X_train_seq.shape[2])
         model = self.build_model(input_shape)
         print("\nFinal Model Architecture:")
         model.summary()
-
 
         # Create callbacks for final training
         callbacks = self.create_callbacks()
@@ -1087,7 +1167,7 @@ class LSTMHighResForecaster:
         print("\nTraining final model...")
         history = model.fit(
             X_train_seq, y_train_seq,
-            epochs=self.epochs, # Use the full number of epochs
+            epochs=self.epochs,
             batch_size=self.batch_size,
             validation_data=(X_val_seq, y_val_seq),
             callbacks=callbacks,
@@ -1098,165 +1178,99 @@ class LSTMHighResForecaster:
         best_model_path = os.path.join(self.model_dir, f'best_model_{self.timestamp}.keras')
         if os.path.exists(best_model_path):
             print(f"\nLoading best model from {best_model_path}")
-            model = tf.keras.models.load_model(best_model_path)
+            # Pass custom_objects when loading the model to ensure the Lambda layer is handled correctly
+            model = tf.keras.models.load_model(best_model_path, safe_mode=False, custom_objects={'clip_scaled_output': clip_scaled_output})
         else:
             print("\nWarning: Best model checkpoint not found. Using the model from the last training epoch.")
 
 
-        # Evaluate model
-        print("\nEvaluating final model...")
+        # Evaluate model using the original test_df slice corresponding to the predictions
+        # Need to slice the original_test_df from data['original_test_df']
+        # The predictions y_pred will correspond to the timestamps starting at index self.sequence_length
+        original_test_df_slice_for_eval = data['original_test_df'].iloc[self.sequence_length:].copy()
+
+        print("\nEvaluating model using post-processing...")
         evaluation_results = self.evaluate_model(
-            model, X_test_seq, y_test_seq, data['scalers']['target'] # Use y_test_seq for evaluation target
+            model,
+            X_test_seq,
+            y_test_scaled, # Pass scaled true targets
+            original_test_df_slice_for_eval, # Pass original test data slice for post-processing logic
+            data['scalers']['target'], # Pass target scaler for inverse transform and scaled zero value
+            data['feature_info'] # Pass feature_info to know radiation column name
         )
 
         # Plot results
         self.plot_results(history, evaluation_results)
 
-        # Save model summary and details to file
-        self.save_model_summary(model, feature_info, evaluation_results, data_path)
+        # Save model summary
+        self.save_model_summary(model, data['feature_info'], evaluation_results, data_path)
 
+
+        # --- Print final results ---
+        print("\n--- Final Evaluation Results (Test Set) ---")
+        # Print post-processed metrics if available, otherwise raw metrics (original then scaled fallback)
+        if 'rmse_postprocessed' in evaluation_results:
+            print(f"RMSE (Post-processed): {evaluation_results['rmse_postprocessed']:.2f}")
+            print(f"MAE (Post-processed): {evaluation_results['mae_postprocessed']:.2f}")
+            print(f"MAPE (Post-processed): {evaluation_results['mape_postprocessed']:.2f}%")
+            print(f"SMAPE (Post-processed): {evaluation_results['smape_postprocessed']:.2f}%")
+            print(f"R² (Post-processed): {evaluation_results['r2_postprocessed']:.4f}")
+        elif 'rmse_raw' in evaluation_results: # Print raw metrics if calculated
+             print(f"RMSE (Raw): {evaluation_results['rmse_raw']:.2f}")
+             print(f"MAE (Raw): {evaluation_results['mae_raw']:.2f}")
+             print(f"MAPE (Raw): {evaluation_results['mape_raw']:.2f}%")
+             print(f"SMAPE (Raw): {evaluation_results['smape_raw']:.2f}%")
+             print(f"R² (Raw): {evaluation_results['r2_raw']:.4f}")
+        else: # Fallback to scaled raw metrics if nothing else
+            print(f"RMSE (Scaled Raw Fallback): {evaluation_results['rmse_scaled']:.6f}")
+            print(f"MAE (Scaled Raw Fallback): {evaluation_results['mae_scaled']:.6f}")
+            print(f"MAPE (Scaled Raw Fallback): {evaluation_results['mape_scaled']:.2f}%")
+            print(f"SMAPE (Scaled Raw Fallback): {evaluation_results['smape_scaled']:.2f}%")
+            print(f"R² (Scaled Raw Fallback): {evaluation_results['r2_scaled']:.4f}")
+
+
+        print("-" * 35)
+        print(f"Model artifacts saved to {self.model_dir}/")
+        print(f"Results plots saved to {self.results_dir}/")
+        if optimize_hyperparams:
+            print(f"Optuna results saved to {self.optuna_results_dir}/")
 
         return evaluation_results
 
-    def save_model_summary(self, model, feature_info, evaluation_results, data_path):
-        """
-        Saves the model architecture, data info, scaling, and evaluation results to a text file.
-        """
-        summary_path = os.path.join(self.model_dir, f'model_summary_{self.timestamp}.txt')
-        print(f"\nSaving model summary and details to {summary_path}")
 
-        with open(summary_path, 'w', encoding='utf-8') as f:
-            f.write(f"# LSTM High Resolution Model ({self.sequence_length}-step lookback)\n\n")
-            f.write(f"Timestamp: {self.timestamp}\n\n")
-
-            f.write("## Model Architecture\n\n")
-            model.summary(print_fn=lambda x: f.write(x + '\n'))
-
-            f.write("\n\n## Data Information\n\n")
-            f.write(f"- Data Source: {data_path}\n")
-            f.write(f"- Data Resolution: 10 minutes\n")
-            f.write(f"- Sequence Length: {self.sequence_length} steps ({self.sequence_length * 10 / 60:.2f} hours lookback)\n")
-            f.write(f"- Training samples (sequences): {evaluation_results['y_test_scaled'].shape[0] if 'y_test_scaled' in evaluation_results else 'N/A'} (based on test set size after sequence creation)\n") # Approximate count based on test set length after sequence creation
-
-
-            f.write("\n\n## Features Used\n")
-            f.write("The model was trained on the following features:\n")
-            for feature in feature_info['all_features']:
-                f.write(f"- {feature}\n")
-            f.write(f"\nTarget variable: {feature_info['target']}\n\n")
-
-
-            f.write("## Scaler Structure and Implementation\n\n")
-            f.write("Multiple scalers were used for different feature types:\n\n")
-
-            if feature_info['minmax_features']:
-                f.write("### MinMaxScaler\n")
-                f.write("Applied to: " + ", ".join(feature_info['minmax_features']) + "\n\n")
-
-            if feature_info['standard_features']:
-                f.write("### StandardScaler\n")
-                f.write("Applied to: " + ", ".join(feature_info['standard_features']) + "\n\n")
-
-            if feature_info['robust_features']:
-                f.write("### RobustScaler\n")
-                f.write("Applied to: " + ", ".join(feature_info['robust_features']) + "\n\n")
-
-            if feature_info['no_scaling_features']:
-                f.write("### No Scaling\n")
-                f.write("Applied to: " + ", ".join(feature_info['no_scaling_features']) + "\n\n")
-
-            f.write("### Target Scaler\n")
-            f.write(f"A MinMaxScaler was used for the target variable ({feature_info['target']}).\n")
-            f.write("Scalers were fitted only on the training data and saved.\n\n")
-
-            f.write("## Hyperparameters\n\n")
-            f.write("Configuration used for the final model:\n")
-            for param, value in self.config.items():
-                f.write(f"- {param}: {value}\n")
-            f.write("\n")
-            if hasattr(self, 'best_params'): # Include if optimization was run
-                f.write("Note: These hyperparameters were determined by Optuna Bayesian Optimization.\n\n")
-
-
-            f.write("## Evaluation Metrics (on Test Set)\n\n")
-            if 'rmse' in evaluation_results: # Check if original scale metrics are available
-                f.write("### Original Scale Metrics\n")
-                f.write(f"- RMSE: {evaluation_results['rmse']:.2f}\n")
-                f.write(f"- MAE: {evaluation_results['mae']:.2f}\n")
-                f.write(f"- MAPE: {evaluation_results['mape']:.2f}%\n")
-                f.write(f"- SMAPE: {evaluation_results['smape']:.2f}%\n")
-                f.write(f"- R² Score: {evaluation_results['r2']:.4f}\n\n")
-            else: # Fallback to scaled metrics if original scale not available
-                f.write("### Scaled Metrics\n")
-                f.write(f"- MSE: {evaluation_results['mse']:.6f}\n")
-                f.write(f"- RMSE: {evaluation_results['rmse']:.6f}\n")
-                f.write(f"- MAE: {evaluation_results['mae']:.6f}\n")
-                f.write(f"- MAPE: {evaluation_results['mape']:.2f}%\n")
-                f.write(f"- SMAPE: {evaluation_results['smape']:.2f}%\n")
-                f.write(f"- R² Score: {evaluation_results['r2']:.4f}\n\n")
-
-
-            f.write("## Inference Data Preparation for this Model\n\n")
-            f.write("To prepare 10-minute data for inference using this trained model, you must follow these steps precisely:\n\n")
-            f.write("1.  Load your raw 10-minute data, ensuring it has the same meteorological features used during training.\n")
-            f.write("2.  Calculate the following time-based and cyclical features:\n")
-            f.write("    -   `time_of_day_hours = hour + minute / 60.0`\n")
-            f.write("    -   `time_of_day_sin = sin(2 * pi * time_of_day_hours / 24.0)`\n")
-            f.write("    -   `time_of_day_cos = cos(2 * pi * time_of_day_hours / 24.0)`\n")
-            f.write("    -   `day_sin = sin(2 * pi * day_of_year / 365.0)`\n")
-            f.write("    -   `day_cos = cos(2 * pi * day_of_year / 365.0)`\n")
-            f.write(f"    -   `isNight` (e.g., based on Global Radiation < 1.0 W/m² or a sun position calculation).\n")
-            f.write("3.  Ensure the 'ClearSkyIndex' feature is present or calculated for the 10-minute data.\n")
-            f.write("4.  Order the features exactly as they were ordered during training:\n")
-            f.write("    " + ", ".join(feature_info['all_features']) + "\n")
-            f.write("5.  Load the saved scalers (`minmax_scaler_*.pkl`, `standard_scaler_*.pkl`, `robust_scaler_*.pkl`) from the model directory.\n")
-            f.write("6.  Apply the corresponding loaded scalers to the appropriate feature columns as done during training.\n")
-            f.write("7.  Create input sequences of length **{self.sequence_length}** from the scaled feature data.\n")
-            f.write("8.  Feed these sequences to the loaded model for prediction.\n")
-            f.write("9.  Load the saved target scaler (`target_scaler_*.pkl`).\n")
-            f.write("10. Use the target scaler to **inverse transform** the model's predictions back to the original power (Watts) scale.\n\n")
-            f.write("Following these steps is crucial for the model to produce meaningful predictions on new data.")
-
-
-# --- Main Execution Block ---
 if __name__ == "__main__":
-    # Parse command line arguments
     parser = argparse.ArgumentParser(description='Run LSTM model for 10-minute PV forecasting with Bayesian hyperparameter optimization')
     parser.add_argument('--optimize', action='store_true', help='Perform hyperparameter optimization')
-    # Updated default sequence length for 10-minute data (24 hours)
     parser.add_argument('--sequence_length', type=int, default=144, help='Sequence length (10-minute intervals to look back, default 144 for 24 hours)')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training (adjust based on GPU memory)')
-    parser.add_argument('--epochs', type=int, default=100, help='Maximum number of epochs for final model training') # Increased default epochs
+    parser.add_argument('--epochs', type=int, default=100, help='Maximum number of epochs for final model training')
     parser.add_argument('--trials', type=int, default=50, help='Number of Optuna optimization trials')
     parser.add_argument('--data_path', type=str, default='data/station_data_10min.parquet', help='Path to the 10-minute resolution data file')
 
     args = parser.parse_args()
 
-    # Check for GPU availability
     print("TensorFlow version:", tf.__version__)
     gpu_devices = tf.config.list_physical_devices('GPU')
     print("GPU Available:", "Yes" if gpu_devices else "No")
     if not gpu_devices:
         print("Warning: No GPU devices found. Training may be very slow on CPU.")
 
-
-    # Set memory growth to avoid memory allocation issues on GPU
     if gpu_devices:
         try:
-            for gpu in gpu_devices:
+            # Corrected: Access the list of GPUs correctly
+            gpus = tf.config.list_physical_devices('GPU')
+            for gpu in gpus:
                 tf.config.experimental.set_memory_growth(gpu, True)
             print("Memory growth set to True for all GPUs")
         except RuntimeError as e:
             print(f"Error setting memory growth: {e}")
 
-    # Set parameters from arguments
     SEQUENCE_LENGTH = args.sequence_length
     BATCH_SIZE = args.batch_size
     EPOCHS = args.epochs
     OPTIMIZE = args.optimize
     N_TRIALS = args.trials
     DATA_PATH = args.data_path
-
 
     print(f"\nRunning LSTM model with parameters:")
     print(f"- Data path: {DATA_PATH}")
@@ -1268,37 +1282,15 @@ if __name__ == "__main__":
     if OPTIMIZE:
         print(f"- Number of optimization trials: {N_TRIALS}")
 
-    # Initialize and run forecaster
     forecaster = LSTMHighResForecaster(
         sequence_length=SEQUENCE_LENGTH,
         batch_size=BATCH_SIZE,
-        epochs=EPOCHS # Max epochs for final training
+        epochs=EPOCHS
     )
 
-    # Run pipeline
+    # Call the main pipeline method
     metrics = forecaster.run_pipeline(
         data_path=DATA_PATH,
         optimize_hyperparams=OPTIMIZE,
         n_trials=N_TRIALS
     )
-
-    # Print final results (will be from original scale if target scaler was used)
-    print("\n--- Final Evaluation Results (Test Set) ---")
-    if 'rmse' in metrics:
-        print(f"RMSE: {metrics['rmse']:.2f}")
-        print(f"MAE: {metrics['mae']:.2f}")
-        print(f"MAPE: {metrics['mape']:.2f}%")
-        print(f"SMAPE: {metrics['smape']:.2f}%")
-        print(f"R²: {metrics['r2']:.4f}")
-    else: # Fallback to scaled metrics if original scale not available
-        print(f"RMSE (Scaled): {metrics['rmse_scaled']:.6f}")
-        print(f"MAE (Scaled): {metrics['mae_scaled']:.6f}")
-        print(f"MAPE (Scaled): {metrics['mape_scaled']:.2f}%")
-        print(f"SMAPE (Scaled): {metrics['smape_scaled']:.2f}%")
-        print(f"R² (Scaled): {metrics['r2_scaled']:.4f}")
-
-    print("-" * 35)
-    print(f"Model artifacts saved to {forecaster.model_dir}/")
-    print(f"Results plots saved to {forecaster.results_dir}/")
-    if OPTIMIZE:
-        print(f"Optuna results saved to {forecaster.optuna_results_dir}/")

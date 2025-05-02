@@ -1,0 +1,68 @@
+Model Summary - Timestamp: 20250501_110918
+------------------------------
+Input Data:
+  Data Path: data/station_data_10min.parquet
+  Sequence Length: 18
+  Features Used: ['GlobalRadiation [W m-2]', 'Temperature [degree_Celsius]', 'WindSpeed [m s-1]', 'ClearSkyIndex', 'time_of_day_sin', 'time_of_day_cos', 'day_sin', 'day_cos']
+------------------------------
+Model Configuration:
+  lstm_units: [64, 32]
+  dense_units: [32, 16]
+  dropout_rates: [0.2, 0.15]
+  dense_dropout_rates: [0.1, 0.05]
+  learning_rate: 0.001
+  bidirectional: False
+  batch_norm: True
+------------------------------
+Model Architecture:
+Model: "sequential"
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
+┃ Layer (type)                         ┃ Output Shape                ┃         Param # ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
+│ lstm_1 (LSTM)                        │ (None, 18, 64)              │          18,688 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ batch_normalization                  │ (None, 18, 64)              │             256 │
+│ (BatchNormalization)                 │                             │                 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dropout (Dropout)                    │ (None, 18, 64)              │               0 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ lstm_2 (LSTM)                        │ (None, 32)                  │          12,416 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ batch_normalization_1                │ (None, 32)                  │             128 │
+│ (BatchNormalization)                 │                             │                 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dropout_1 (Dropout)                  │ (None, 32)                  │               0 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dense (Dense)                        │ (None, 32)                  │           1,056 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ batch_normalization_2                │ (None, 32)                  │             128 │
+│ (BatchNormalization)                 │                             │                 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dropout_2 (Dropout)                  │ (None, 32)                  │               0 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dense_1 (Dense)                      │ (None, 16)                  │             528 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ batch_normalization_3                │ (None, 16)                  │              64 │
+│ (BatchNormalization)                 │                             │                 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dense_2 (Dense)                      │ (None, 1)                   │              17 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ scaled_output_clipping (Lambda)      │ (None, 1)                   │               0 │
+└──────────────────────────────────────┴─────────────────────────────┴─────────────────┘
+ Total params: 99,269 (387.77 KB)
+ Trainable params: 32,993 (128.88 KB)
+ Non-trainable params: 288 (1.12 KB)
+ Optimizer params: 65,988 (257.77 KB)
+
+------------------------------
+Evaluation Results (Test Set):
+  Metrics (Post-processed, Original Scale):
+    RMSE: 745.75
+    MAE: 282.46
+    MAPE: 1440838664674.31%
+    SMAPE: 35.08%
+    R²: 0.4078
+------------------------------
+Scalers saved to: models/lstm_10min/*_scaler_20250501_110918.pkl
+Best model saved to: models/lstm_10min/best_model_20250501_110918.keras
+Results plots saved to: results/lstm_10min_*20250501_110918.png
