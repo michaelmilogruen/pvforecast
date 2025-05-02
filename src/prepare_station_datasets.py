@@ -539,9 +539,9 @@ class StationDataProcessor:
                 0.0 # Set to 0 for nighttime or very low clear sky irradiance
             )
 
-            # Clip unrealistic clear sky index values
+            # Re-added: Clipping unrealistic clear sky index values
             df_merged_pvlib['ClearSkyIndex'] = df_merged_pvlib['ClearSkyIndex'].clip(0, self.CSI_HIGH_THRESHOLD_DAYTIME) # Clip upper end based on defined threshold
-            logging.info("Calculated Clear Sky Index.")
+            logging.info(f"Calculated Clear Sky Index (clipped at {self.CSI_HIGH_THRESHOLD_DAYTIME}).")
         else:
              logging.warning("Cannot calculate Clear Sky Index: Missing 'GlobalRadiation [W m-2]' or 'ClearSkyGHI'.")
              if 'ClearSkyIndex' not in df_merged_pvlib.columns:
@@ -855,53 +855,77 @@ class StationDataProcessor:
         """
         logging.info(f"Generating specific variable plots{title_suffix}...")
 
-        # Updated required columns, replacing SolarAzimuth with AOI
-        required_cols = ['power_w', 'GlobalRadiation [W m-2]', 'AOI [degrees]', 'ClearSkyIndex']
+        # Updated required columns for plotting
+        # Note: Temperature is removed, GlobalRadiation and ClearSkyGHI will be on the same plot
+        required_cols = ['power_w', 'GlobalRadiation [W m-2]', 'ClearSkyGHI', 'AOI [degrees]', 'ClearSkyIndex']
         available_cols = [col for col in required_cols if col in df.columns]
 
-        if len(available_cols) < len(required_cols):
-             missing_cols = [col for col in required_cols if col not in df.columns]
-             logging.warning(f"Skipping specific variable plots due to missing columns: {missing_cols}")
-             # Print available columns for debugging
+        # Determine which plots we can actually generate
+        # Power plot
+        can_plot_power = 'power_w' in available_cols
+        # Radiation plot (requires both measured GHI and ClearSkyGHI)
+        can_plot_radiation = 'GlobalRadiation [W m-2]' in available_cols and 'ClearSkyGHI' in available_cols
+        # AOI plot
+        can_plot_aoi = 'AOI [degrees]' in available_cols
+        # CSI plot
+        can_plot_csi = 'ClearSkyIndex' in available_cols
+
+        # Count the number of subplots needed
+        num_subplots = sum([can_plot_power, can_plot_radiation, can_plot_aoi, can_plot_csi])
+
+        if num_subplots == 0:
+             logging.warning("No specific variable plots can be generated with available columns.")
              logging.info(f"Available columns: {df.columns.tolist()}")
              return
 
         # Create vertical subplots sharing the x-axis
-        fig, axes = plt.subplots(len(available_cols), 1, figsize=(15, 4 * len(available_cols)), sharex=True)
+        fig, axes = plt.subplots(num_subplots, 1, figsize=(15, 4 * num_subplots), sharex=True)
 
         # Ensure axes is an array even for 1 subplot
-        if len(available_cols) == 1:
+        if num_subplots == 1:
             axes = [axes]
 
-        # Map required columns to their plotting index (maintaining order for plotting)
-        col_plot_order = {col: i for i, col in enumerate(required_cols)}
+        # Keep track of the current axis index
+        ax_idx = 0
 
-        # Plot based on the order defined in required_cols
-        for col in required_cols:
-            if col in available_cols:
-                ax_index = col_plot_order[col]
-                if col == 'power_w':
-                    df[col].plot(ax=axes[ax_index], color='orange')
-                    axes[ax_index].set_title(f'PV Power Output{title_suffix}')
-                    axes[ax_index].set_ylabel('Power [W]')
-                    axes[ax_index].grid(True)
-                elif col == 'GlobalRadiation [W m-2]':
-                    df[col].plot(ax=axes[ax_index], color='gold')
-                    axes[ax_index].set_title(f'Global Radiation (Measured){title_suffix}')
-                    axes[ax_index].set_ylabel('Irradiance [W/m²]')
-                    axes[ax_index].grid(True)
-                elif col == 'AOI [degrees]': # Plotting AOI
-                    df[col].plot(ax=axes[ax_index], color='deepskyblue')
-                    axes[ax_index].set_title(f'Angle of Incidence (AOI){title_suffix}')
-                    axes[ax_index].set_ylabel('Angle [degrees]')
-                    axes[ax_index].grid(True)
-                    axes[ax_index].set_ylim(0, 180) # AOI is typically between 0 and 180 degrees
-                elif col == 'ClearSkyIndex':
-                    df[col].plot(ax=axes[ax_index], color='red')
-                    axes[ax_index].set_title(f'Clear Sky Index{title_suffix}')
-                    axes[ax_index].set_ylabel('Clear Sky Index')
-                    axes[ax_index].grid(True)
-                    axes[ax_index].set_ylim(0, self.CSI_HIGH_THRESHOLD_DAYTIME + 0.5) # Set limit based on threshold
+        # Plot Power
+        if can_plot_power:
+            df['power_w'].plot(ax=axes[ax_idx], color='orange', label='PV Power')
+            axes[ax_idx].set_title(f'PV Power Output{title_suffix}')
+            axes[ax_idx].set_ylabel('Power [W]')
+            axes[ax_idx].grid(True)
+            axes[ax_idx].legend()
+            ax_idx += 1
+
+        # Plot Global Radiation and Clear Sky GHI on the same subplot
+        if can_plot_radiation:
+            df[['GlobalRadiation [W m-2]', 'ClearSkyGHI']].plot(ax=axes[ax_idx])
+            axes[ax_idx].set_title(f'Global Radiation (Measured) vs. Clear Sky GHI{title_suffix}')
+            axes[ax_idx].set_ylabel('Irradiance [W/m²]')
+            axes[ax_idx].grid(True)
+            axes[ax_idx].legend(['Measured GHI', 'Clear Sky GHI']) # Custom legend labels
+            ax_idx += 1
+
+        # Plot AOI
+        if can_plot_aoi:
+            df['AOI [degrees]'].plot(ax=axes[ax_idx], color='deepskyblue', label='AOI')
+            axes[ax_idx].set_title(f'Angle of Incidence (AOI){title_suffix}')
+            axes[ax_idx].set_ylabel('Angle [degrees]')
+            axes[ax_idx].grid(True)
+            axes[ax_idx].set_ylim(0, 180) # AOI is typically between 0 and 180 degrees
+            axes[ax_idx].legend()
+            ax_idx += 1
+
+        # Plot Clear Sky Index
+        if can_plot_csi:
+            df['ClearSkyIndex'].plot(ax=axes[ax_idx], color='red', label='Clear Sky Index')
+            axes[ax_idx].set_title(f'Clear Sky Index{title_suffix}')
+            axes[ax_idx].set_ylabel('Clear Sky Index')
+            axes[ax_idx].grid(True)
+            # Removed: Setting upper limit based on CSI_HIGH_THRESHOLD_DAYTIME
+            # axes[ax_idx].set_ylim(0, self.CSI_HIGH_THRESHOLD_DAYTIME + 0.5) # Set limit based on threshold
+            axes[ax_idx].legend()
+            ax_idx += 1
 
 
         # Set the x-label only on the last subplot

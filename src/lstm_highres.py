@@ -9,11 +9,13 @@ preprocessing, feature engineering, model training, and evaluation.
 
 Key features:
 1. Data preprocessing and feature scaling
-2. Feature engineering for 10-minute resolution (including combined hour-minute cyclical feature)
+2. Feature engineering for 10-minute resolution (including cyclical features)
 3. LSTM model architecture
 4. Hyperparameter optimization using Bayesian optimization with Optuna
 5. Model evaluation and visualization
 6. Fix for 'tf' not defined error in Lambda layer.
+7. **Modified to load data from a specified parquet file and use a specific list
+   of features, including 'hour_cos' and 'isNight', without additional data augmentation.**
 """
 
 import numpy as np
@@ -30,6 +32,7 @@ import os
 import optuna
 from datetime import datetime
 import argparse
+import math # Import math for pi
 
 # Set random seeds for reproducibility
 np.random.seed(42)
@@ -73,7 +76,7 @@ class LSTMHighResForecaster:
         # Note: These ranges might need tuning based on the 10-minute data characteristics
         self.config = {
             'lstm_units': [64, 32],  # Default 2 LSTM layers
-            'dense_units': [32, 16],   # Default 2 dense layers
+            'dense_units': [32, 16],  # Default 2 dense layers
             'dropout_rates': [0.2, 0.15], # Adaptive dropout rates for LSTM layers
             'dense_dropout_rates': [0.1, 0.05], # Adaptive dropout rates for dense layers
             'learning_rate': 0.001,
@@ -83,18 +86,39 @@ class LSTMHighResForecaster:
 
     def load_data(self, data_path):
         """
-        Load data for training.
+        Load data for training from the specified file path.
 
         Args:
-            data_path: Path to the parquet file containing the data (expected 10-minute resolution)
+            data_path: Path to the data file (expected 10-minute resolution).
 
         Returns:
-            Loaded dataframe
+            Loaded dataframe with datetime index.
         """
         print(f"Loading data from {data_path}...")
         try:
+            # Changed back to reading parquet file
             df = pd.read_parquet(data_path)
             print(f"Data shape: {df.shape}")
+
+            # Ensure the index is a datetime index
+            if not isinstance(df.index, pd.DatetimeIndex):
+                print("Warning: DataFrame index is not DatetimeIndex. Attempting to convert.")
+                try:
+                    # Assuming the index column is named 'index' or similar, or is the first column
+                    # You might need to adjust this based on your parquet file structure
+                    if 'index' in df.columns:
+                        df['index'] = pd.to_datetime(df['index'])
+                        df = df.set_index('index')
+                    else:
+                        # Attempt to use the current index if it's not DatetimeIndex
+                        df.index = pd.to_datetime(df.index)
+                    print("Index converted to DatetimeIndex.")
+                except Exception as e_index:
+                    print(f"Error converting index to datetime: {e_index}")
+                    print("Please ensure your data file has a proper datetime index or modify the load_data method.")
+                    exit()
+
+
             print(f"Data range: {df.index.min()} to {df.index.max()}")
 
             # Check for missing values
@@ -103,7 +127,7 @@ class LSTMHighResForecaster:
                 print("Missing values in dataset:")
                 print(missing_values[missing_values > 0])
 
-                # Fill missing values
+                # Fill missing values (standard data cleaning, not augmentation)
                 print("Filling missing values using ffill followed by bfill...")
                 # For numeric columns, use forward fill then backward fill
                 df = df.fillna(method='ffill').fillna(method='bfill')
@@ -124,7 +148,8 @@ class LSTMHighResForecaster:
     def create_time_features(self, df):
         """
         Create time-based and cyclical features from the datetime index for 10-minute data.
-        Combines hour and minute into a single time-of-day feature for daily cycles.
+        Includes day of year cyclical features and isNight based on radiation.
+        Note: 'hour_cos' is expected to be in the raw data based on user request.
 
         Args:
             df: DataFrame with a DatetimeIndex
@@ -135,27 +160,21 @@ class LSTMHighResForecaster:
         print("Creating time-based and cyclical features...")
 
         # Cyclical features for the day of the year (seasonal variation)
-        df['day_sin'] = np.sin(2 * np.pi * df.index.dayofyear / 365.0)
-        df['day_cos'] = np.cos(2 * np.pi * df.index.dayofyear / 365.0)
+        df['day_sin'] = np.sin(2 * math.pi * df.index.dayofyear / 365.0)
+        df['day_cos'] = np.cos(2 * math.pi * df.index.dayofyear / 365.0)
 
-        # Combine hour and minute into a single time-of-day feature (in hours)
-        # Example: 3:30 becomes 3.5
-        df['time_of_day_hours'] = df.index.hour + df.index.minute / 60.0
-
-        # Apply sinusoidal encoding to the combined time-of-day feature (daily cycle)
-        df['time_of_day_sin'] = np.sin(2 * np.pi * df['time_of_day_hours'] / 24.0)
-        df['time_of_day_cos'] = np.cos(2 * np.pi * df['time_of_day_hours'] / 24.0)
-
-        # isNight calculation (simplified - ideally use sun position)
-        # Assuming 'GlobalRadiation [W m-2]' exists in the data
-        if 'GlobalRadiation [W m-2]' in df.columns:
-            df['isNight'] = (df['GlobalRadiation [W m-2]'] < 1.0).astype(int)
+        # isNight calculation based on Global Radiation
+        radiation_col_name = 'GlobalRadiation [W m-2]'
+        if radiation_col_name in df.columns:
+            # Using a small threshold to define night
+            RADIATION_THRESHOLD = 1.0 # W/m² - Adjust this threshold as needed
+            df['isNight'] = (df[radiation_col_name] < RADIATION_THRESHOLD).astype(int)
             print("'isNight' feature created based on Global Radiation.")
         else:
-            # If GlobalRadiation is not available, a more complex sun position calculation would be needed
-            print("Warning: 'GlobalRadiation [W m-2]' not found. Cannot create 'isNight' feature based on irradiation.")
-            # For robustness, add a placeholder column if expected later
-            df['isNight'] = 0 # Add a default column if not found, might impact model if relied upon
+            print(f"Warning: '{radiation_col_name}' not found. Cannot create 'isNight' feature based on irradiation.")
+            # Add a placeholder column if the feature is expected later in prepare_features
+            # If 'isNight' is in the user's requested features, this placeholder will be used
+            df['isNight'] = 0 # Default to 0 (not night) if radiation data is missing
 
 
         return df
@@ -163,7 +182,8 @@ class LSTMHighResForecaster:
 
     def prepare_features(self, df):
         """
-        Define and group features for the model based on scaling needs.
+        Define and group features for the model based on the user's specified list
+        and standard time-based engineered features (day_sin, day_cos).
 
         Args:
             df: DataFrame with all raw and engineered features
@@ -171,59 +191,83 @@ class LSTMHighResForecaster:
         Returns:
             Dictionary with feature information
         """
-        # Define features to use - ensure these columns exist after loading and engineering
+        # Define features to use based on the user's exact list
+        # Adding day_sin and day_cos from feature engineering as they are standard.
         features = [
             'GlobalRadiation [W m-2]',
+            'ClearSkyDHI',
+            'ClearSkyGHI',
+            'ClearSkyDNI',
+            'SolarZenith [degrees]',
+            'AOI [degrees]',
+            'isNight', # Included as per user's list
+            'ClearSkyIndex',
+            'hour_cos', # Included as per user's list
             'Temperature [degree_Celsius]',
             'WindSpeed [m s-1]',
-            'ClearSkyIndex',
-            # Replaced hour_sin/cos and minute_sin/cos with combined time_of_day_sin/cos
-            'time_of_day_sin',
-            'time_of_day_cos',
-            'day_sin', # Keep day features for seasonal variation
-            'day_cos', # Keep day features for seasonal variation
-            #'isNight'
+            # Engineered day features (derived from index, not augmentation)
+            'day_sin',
+            'day_cos',
         ]
 
-        # Verify all intended features exist in the dataframe
+        # Verify all intended features exist in the dataframe after loading and engineering
         missing_features = [f for f in features if f not in df.columns]
         if missing_features:
-            print(f"Error: Missing features after loading and engineering: {missing_features}")
-            # Decide how to handle missing critical features - exiting might be best
-            # For this script, we'll remove them, but be aware this might impact model performance
-            print(f"Removing missing features from the list: {missing_features}")
-            features = [f for f in features if f in df.columns]
-            if not features:
-                print("Error: No valid features remaining after checking. Exiting.")
-                exit()
+            print(f"Error: The following required features are missing from the dataset after loading and engineering: {missing_features}")
+            # Since the user requested *only* these features, we should exit if critical ones are missing.
+            print("Please check your data file and ensure it contains these columns.")
+            exit()
 
-
-        # Group features by scaling method based on common practices and your original code's logic
-        # - Global Radiation and ClearSkyIndex: Often highly skewed - MinMaxScaler
-        # - Temperature: Can be varying - StandardScaler is often robust
-        # - Wind Speed: Can have outliers - RobustScaler is useful
-        # - Time features (sin/cos) and isNight: Already in a bounded range - No scaling needed
-
-        minmax_features = ['GlobalRadiation [W m-2]', 'ClearSkyIndex']
-        standard_features = ['Temperature [degree_Celsius]']
+        # Group features by scaling method
+        # MinMaxScaler: Features that are non-negative and often bounded (like radiation, clear sky values, index)
+        # StandardScaler: Features with varying ranges, potentially negative (like temperature, angles)
+        # RobustScaler: Features potentially sensitive to outliers (like wind speed)
+        # No scaling: Binary or already scaled cyclical features
+        minmax_features = [
+            'GlobalRadiation [W m-2]',
+            'ClearSkyDHI',
+            'ClearSkyGHI',
+            'ClearSkyDNI',
+            'ClearSkyIndex'
+        ]
+        standard_features = [
+            'Temperature [degree_Celsius]',
+            'SolarZenith [degrees]',
+            'AOI [degrees]'
+        ]
         robust_features = ['WindSpeed [m s-1]']
-        # Updated list for no scaling features
-        no_scaling_features = ['time_of_day_sin', 'time_of_day_cos', 'day_sin', 'day_cos', 'isNight']
+        no_scaling_features = [
+            'isNight', # Included as per user's list
+            'hour_cos', # Included as per user's list
+            'day_sin',
+            'day_cos',
+        ]
 
-        # Filter to only include features that actually exist in the dataframe (after checking above)
-        minmax_features = [f for f in minmax_features if f in features]
-        standard_features = [f for f in standard_features if f in features]
-        robust_features = [f for f in robust_features if f in features]
-        no_scaling_features = [f for f in no_scaling_features if f in features]
+        # Ensure all features are accounted for in the scaling groups
+        all_grouped_features = minmax_features + standard_features + robust_features + no_scaling_features
+        if set(features) != set(all_grouped_features):
+            print("Warning: Mismatch between defined 'features' list and scaling groups.")
+            # Use the defined 'features' list as the definitive list for columns to select
+            # Filter scaling groups to only include features that are actually in the 'features' list
+            minmax_features = [f for f in minmax_features if f in features]
+            standard_features = [f for f in standard_features if f in features]
+            robust_features = [f for f in robust_features if f in features]
+            no_scaling_features = [f for f in no_scaling_features if f in features]
+            print("Adjusted scaling groups to match the defined features list.")
+
 
         # Reconstruct the 'all_features' list in a defined order for consistent scaling
+        # This order is used later when creating the scaled DataFrame
         all_features_ordered = minmax_features + standard_features + robust_features + no_scaling_features
         # Ensure no duplicates and all features are included
         all_features_ordered = list(dict.fromkeys(all_features_ordered)) # Removes duplicates and preserves order
-        # Final check that all original 'features' are in the ordered list
+
+        # Final check that all original 'features' are in the ordered list (should be true after filtering)
         if set(features) != set(all_features_ordered):
-            print("Warning: Feature list mismatch during ordering.")
-            # Use the ordered list for consistency going forward
+            print("Error: Feature list mismatch after ordering. This should not happen. Exiting.")
+            exit()
+        else:
+            # Use the ordered list as the definitive list of features to select from the DataFrame
             features = all_features_ordered
 
 
@@ -263,7 +307,8 @@ class LSTMHighResForecaster:
         """
         # Split data into train, validation, and test sets by time
         # Use 70% for training, 15% for validation, 15% for testing
-        # Use iloc for position-based slicing after ensuring index is sorted (parquet usually handles this)
+        # Use iloc for position-based slicing after ensuring index is sorted
+        df = df.sort_index() # Ensure data is sorted by time
         total_size = len(df)
         train_size = int(total_size * 0.7)
         val_size = int(total_size * 0.15)
@@ -271,7 +316,7 @@ class LSTMHighResForecaster:
 
         train_df = df.iloc[:train_size]
         val_df = df.iloc[train_size : train_size + val_size]
-        test_df = df.iloc[train_size + val_size : ] # Keep original test_df
+        test_df = df.iloc[train_size + val_size : ].copy() # Keep original test_df and make a copy
 
         print(f"Total data size: {total_size}")
         print(f"Train set size: {len(train_df)}")
@@ -279,6 +324,7 @@ class LSTMHighResForecaster:
         print(f"Test set size: {len(test_df)}")
 
         # Initialize scalers for different feature groups
+        # Only initialize if there are features in that group
         minmax_scaler = MinMaxScaler() if feature_info['minmax_features'] else None
         standard_scaler = StandardScaler() if feature_info['standard_features'] else None
         robust_scaler = RobustScaler() if feature_info['robust_features'] else None
@@ -306,41 +352,24 @@ class LSTMHighResForecaster:
 
         # Function to scale features using appropriate scalers
         def scale_features(df_subset):
-            scaled_data = {}
+            # Select only the features defined in feature_info['all_features']
+            df_subset_selected = df_subset[feature_info['all_features']].copy()
 
             # Apply MinMaxScaler to appropriate features
             if minmax_scaler and feature_info['minmax_features']:
-                scaled_minmax = minmax_scaler.transform(df_subset[feature_info['minmax_features']])
-                for i, feature in enumerate(feature_info['minmax_features']):
-                    scaled_data[feature] = scaled_minmax[:, i]
+                df_subset_selected[feature_info['minmax_features']] = minmax_scaler.transform(df_subset_selected[feature_info['minmax_features']])
 
             # Apply StandardScaler to appropriate features
             if standard_scaler and feature_info['standard_features']:
-                scaled_standard = standard_scaler.transform(df_subset[feature_info['standard_features']])
-                for i, feature in enumerate(feature_info['standard_features']):
-                    scaled_data[feature] = scaled_standard[:, i]
+                df_subset_selected[feature_info['standard_features']] = standard_scaler.transform(df_subset_selected[feature_info['standard_features']])
 
             # Apply RobustScaler to appropriate features
             if robust_scaler and feature_info['robust_features']:
-                scaled_robust = robust_scaler.transform(df_subset[feature_info['robust_features']])
-                for i, feature in enumerate(feature_info['robust_features']):
-                    scaled_data[feature] = scaled_robust[:, i]
+                df_subset_selected[feature_info['robust_features']] = robust_scaler.transform(df_subset_selected[feature_info['robust_features']])
 
-            # Add features that don't need scaling
-            for feature in feature_info['no_scaling_features']:
-                # Ensure feature exists before trying to access it
-                if feature in df_subset.columns:
-                    scaled_data[feature] = df_subset[feature].values
-                else:
-                    print(f"Warning: Feature '{feature}' not found in subset for scaling.")
+            # Features in no_scaling_features are already in df_subset_selected and not transformed
 
-
-            # Create DataFrame with all scaled features, maintaining original index
-            # Ensure columns are in the same order as feature_info['all_features']
-            # Use reindex to ensure column order, filling missing if any (though should not happen here)
-            scaled_df = pd.DataFrame(scaled_data, index=df_subset.index).reindex(columns=feature_info['all_features'])
-
-            return scaled_df
+            return df_subset_selected
 
         # Apply scaling to each dataset
         X_train = scale_features(train_df)
@@ -807,7 +836,6 @@ class LSTMHighResForecaster:
             'mse_scaled_postprocessed': mse_scaled,
             'rmse_scaled_postprocessed': rmse_scaled,
             'mae_scaled_postprocessed': mae_scaled,
-            'mape_scaled_postprocessed': mape_scaled,
             'smape_scaled_postprocessed': smape_scaled,
             'r2_scaled_postprocessed': r2_scaled,
             'y_test_scaled': y_test_scaled,
@@ -896,13 +924,13 @@ class LSTMHighResForecaster:
             f.write(f"Model Summary - Timestamp: {self.timestamp}\n")
             f.write("-" * 30 + "\n")
             f.write("Input Data:\n")
-            f.write(f"  Data Path: {data_path}\n")
-            f.write(f"  Sequence Length: {self.sequence_length}\n")
-            f.write(f"  Features Used: {feature_info['all_features']}\n")
+            f.write(f"    Data Path: {data_path}\n")
+            f.write(f"    Sequence Length: {self.sequence_length}\n")
+            f.write(f"    Features Used ({len(feature_info['all_features'])}): {feature_info['all_features']}\n")
             f.write("-" * 30 + "\n")
             f.write("Model Configuration:\n")
             for key, value in self.config.items():
-                f.write(f"  {key}: {value}\n")
+                f.write(f"    {key}: {value}\n")
             f.write("-" * 30 + "\n")
             f.write("Model Architecture:\n")
             model.summary(print_fn=lambda x: f.write(x + '\n'))
@@ -910,25 +938,25 @@ class LSTMHighResForecaster:
             f.write("Evaluation Results (Test Set):\n")
             # Print post-processed metrics if available, otherwise raw metrics
             if 'rmse_postprocessed' in evaluation_results:
-                f.write("  Metrics (Post-processed, Original Scale):\n")
+                f.write("    Metrics (Post-processed, Original Scale):\n")
                 f.write(f"    RMSE: {evaluation_results['rmse_postprocessed']:.2f}\n")
                 f.write(f"    MAE: {evaluation_results['mae_postprocessed']:.2f}\n")
                 f.write(f"    MAPE: {evaluation_results['mape_postprocessed']:.2f}%\n")
                 f.write(f"    SMAPE: {evaluation_results['smape_postprocessed']:.2f}%\n")
                 f.write(f"    R²: {evaluation_results['r2_postprocessed']:.4f}\n")
-            elif 'rmse_raw' in evaluation_results:
-                 f.write("  Metrics (Raw, Original Scale):\n")
+            elif 'rmse_raw' in evaluation_results: # Print raw metrics if calculated
+                 f.write("    Metrics (Raw, Original Scale):\n")
                  f.write(f"    RMSE: {evaluation_results['rmse_raw']:.2f}\n")
                  f.write(f"    MAE: {evaluation_results['mae_raw']:.2f}\n")
-                 f.write(f"    MAPE: {evaluation_results['mape_raw']:.2f}%\n")
-                 f.write(f"    SMAPE: {evaluation_results['smape_raw']:.2f}%\n")
+                 f.write(f"    MAPE: {evaluation_results['mape_raw']:.2f}%")
+                 f.write(f"    SMAPE: {evaluation_results['smape_raw']:.2f}%")
                  f.write(f"    R²: {evaluation_results['r2_raw']:.4f}\n")
-            else:
-                 f.write("  Metrics (Scaled Raw Fallback):\n")
+            else: # Fallback to scaled raw metrics if nothing else
+                 f.write("    Metrics (Scaled Raw Fallback):\n")
                  f.write(f"    RMSE: {evaluation_results['rmse_scaled']:.6f}\n")
                  f.write(f"    MAE: {evaluation_results['mae_scaled']:.6f}\n")
-                 f.write(f"    MAPE: {evaluation_results['mape_scaled']:.2f}%\n")
-                 f.write(f"    SMAPE: {evaluation_results['smape_scaled']:.2f}%\n")
+                 f.write(f"    MAPE: {evaluation_results['mape_scaled']:.2f}%")
+                 f.write(f"    SMAPE: {evaluation_results['smape_scaled']:.2f}%")
                  f.write(f"    R²: {evaluation_results['r2_scaled']:.4f}\n")
 
             f.write("-" * 30 + "\n")
@@ -1096,30 +1124,33 @@ class LSTMHighResForecaster:
         # Load the raw data
         df = self.load_data(data_path)
 
-        # Create time features (assuming they are not already in the raw parquet)
-        print("\nCreating time-based and cyclical features...")
-        df['day_sin'] = np.sin(2 * np.pi * df.index.dayofyear / 365.0)
-        df['day_cos'] = np.cos(2 * np.pi * df.index.dayofyear / 365.0)
-        df['time_of_day_hours'] = df.index.hour + df.index.minute / 60.0
-        df['time_of_day_sin'] = np.sin(2 * np.pi * df['time_of_day_hours'] / 24.0)
-        df['time_of_day_cos'] = np.cos(2 * np.pi * df['time_of_day_hours'] / 24.0)
-        # Assuming 'GlobalRadiation [W m-2]' exists for isNight check/feature
-        radiation_col_name = 'GlobalRadiation [W m-2]'
-        if radiation_col_name in df.columns:
-             df['isNight'] = (df[radiation_col_name] < 1.0).astype(int) # Using a small threshold
-        else:
-             df['isNight'] = 0 # Placeholder if radiation is missing
-
+        # Create time features (day_sin, day_cos, isNight)
+        # Note: hour_cos is expected to be in the raw data as per user request
+        df = self.create_time_features(df)
 
         # Prepare features (defines which columns to use and how to scale)
+        # This step now uses the specific list of features requested by the user
+        # plus the engineered day features and isNight.
         feature_info = self.prepare_features(df)
+
+        # Select only the features and target defined in prepare_features before splitting/scaling
+        # This ensures we are working only with the specified columns.
+        required_cols = feature_info['all_features'] + [feature_info['target']]
+        # Check if all required columns exist after loading and feature engineering
+        missing_required_cols = [col for col in required_cols if col not in df.columns]
+        if missing_required_cols:
+            print(f"Error: The following required columns (features or target) are missing before splitting/scaling: {missing_required_cols}. Exiting.")
+            exit()
+
+        df_processed = df[required_cols].copy()
+
 
         # Split and scale data (applies scalers and creates splits, returns original test_df)
         # The original_test_df is needed for post-processing checks based on original feature values
-        data = self.split_and_scale_data(df, feature_info)
+        data = self.split_and_scale_data(df_processed, feature_info) # Corrected method name
 
-        # Clear original dataframe after splitting/scaling
-        del df
+        # Clear dataframe after splitting/scaling to free memory
+        del df, df_processed
         # --- End of Data Loading and Preparation ---
 
 
@@ -1222,11 +1253,11 @@ class LSTMHighResForecaster:
              print(f"SMAPE (Raw): {evaluation_results['smape_raw']:.2f}%")
              print(f"R² (Raw): {evaluation_results['r2_raw']:.4f}")
         else: # Fallback to scaled raw metrics if nothing else
-            print(f"RMSE (Scaled Raw Fallback): {evaluation_results['rmse_scaled']:.6f}")
-            print(f"MAE (Scaled Raw Fallback): {evaluation_results['mae_scaled']:.6f}")
-            print(f"MAPE (Scaled Raw Fallback): {evaluation_results['mape_scaled']:.2f}%")
-            print(f"SMAPE (Scaled Raw Fallback): {evaluation_results['smape_scaled']:.2f}%")
-            print(f"R² (Scaled Raw Fallback): {evaluation_results['r2_scaled']:.4f}")
+             print(f"RMSE (Scaled Raw Fallback): {evaluation_results['rmse_scaled']:.6f}")
+             print(f"MAE (Scaled Raw Fallback): {evaluation_results['mae_scaled']:.6f}")
+             print(f"MAPE (Scaled Raw Fallback): {evaluation_results['mape_scaled']:.2f}%")
+             print(f"SMAPE (Scaled Raw Fallback): {evaluation_results['smape_scaled']:.2f}%")
+             f.write(f"R² (Scaled Raw Fallback): {evaluation_results['r2_scaled']:.4f}\n")
 
 
         print("-" * 35)
@@ -1245,7 +1276,8 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training (adjust based on GPU memory)')
     parser.add_argument('--epochs', type=int, default=100, help='Maximum number of epochs for final model training')
     parser.add_argument('--trials', type=int, default=50, help='Number of Optuna optimization trials')
-    parser.add_argument('--data_path', type=str, default='data/station_data_10min.parquet', help='Path to the 10-minute resolution data file')
+    # Updated default data path to the specified parquet file
+    parser.add_argument('--data_path', type=str, default='data/processed/station_data_10min.parquet', help='Path to the 10-minute resolution data file')
 
     args = parser.parse_args()
 
@@ -1270,7 +1302,7 @@ if __name__ == "__main__":
     EPOCHS = args.epochs
     OPTIMIZE = args.optimize
     N_TRIALS = args.trials
-    DATA_PATH = args.data_path
+    DATA_PATH = args.data_path # This will now be the path to your market file
 
     print(f"\nRunning LSTM model with parameters:")
     print(f"- Data path: {DATA_PATH}")
