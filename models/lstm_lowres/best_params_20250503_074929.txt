@@ -1,0 +1,8 @@
+Optimized Hyperparameters:
+lstm_units: [70, 37]
+dense_units: [52, 18]
+dropout_rates: [0.3855244728460264, 0.18543733556034217]
+dense_dropout_rates: [0.24439625936369605]
+learning_rate: 0.0019187979077377184
+bidirectional: False
+batch_norm: False

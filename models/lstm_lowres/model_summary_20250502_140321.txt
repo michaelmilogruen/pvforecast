@@ -1,0 +1,53 @@
+Model Summary - Timestamp: 20250502_140321
+------------------------------
+Input Data:
+    Data Path: data/processed/station_data_1h.parquet
+    Sequence Length: 6
+    Features Used (13): ['GlobalRadiation [W m-2]', 'ClearSkyDHI', 'ClearSkyGHI', 'ClearSkyDNI', 'ClearSkyIndex', 'Temperature [degree_Celsius]', 'SolarZenith [degrees]', 'AOI [degrees]', 'WindSpeed [m s-1]', 'isNight', 'hour_cos', 'day_sin', 'day_cos']
+------------------------------
+Model Configuration:
+    lstm_units: [228, 56]
+    dense_units: [46]
+    dropout_rates: [0.18955262654893784, 0.4223380805559861]
+    dense_dropout_rates: []
+    learning_rate: 0.0029890897510393383
+    bidirectional: True
+    batch_norm: False
+------------------------------
+Model Architecture:
+Model: "sequential_1"
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
+┃ Layer (type)                         ┃ Output Shape                ┃         Param # ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
+│ bidirectional_3 (Bidirectional)      │ (None, 6, 456)              │         441,408 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dropout_3 (Dropout)                  │ (None, 6, 456)              │               0 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ bidirectional_4 (Bidirectional)      │ (None, 112)                 │         229,824 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dropout_4 (Dropout)                  │ (None, 112)                 │               0 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dense_2 (Dense)                      │ (None, 46)                  │           5,198 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dense_3 (Dense)                      │ (None, 1)                   │              47 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ scaled_output_clipping (Lambda)      │ (None, 1)                   │               0 │
+└──────────────────────────────────────┴─────────────────────────────┴─────────────────┘
+ Total params: 2,029,433 (7.74 MB)
+ Trainable params: 676,477 (2.58 MB)
+ Non-trainable params: 0 (0.00 B)
+ Optimizer params: 1,352,956 (5.16 MB)
+
+------------------------------
+Evaluation Results (Test Set):
+    Metrics (Post-processed, Original Scale):
+    RMSE: 479.63
+    MAE: 210.70
+    MAPE: 10508962134.27%
+    SMAPE: 27.16%
+    R²: 0.8492
+------------------------------
+Scalers saved to: models/lstm_lowres/*_scaler_20250502_140321.pkl
+Best model saved to: models/lstm_lowres/best_model_20250502_140321.keras
+Results plots saved to: results/lstm_lowres_*20250502_140321.png
+Optuna study database: results\lstm_lowres_optuna/optuna_study_20250502_140321.db

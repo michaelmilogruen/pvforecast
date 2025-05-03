@@ -14,8 +14,10 @@ Key features:
 4. Hyperparameter optimization using Bayesian optimization with Optuna
 5. Model evaluation and visualization
 6. Fix for 'tf' not defined error in Lambda layer.
-7. **Modified to load data from a specified parquet file and use a specific list
-   of features, including 'hour_cos' and 'isNight', without additional data augmentation.**
+7. Modified to load data from a specified parquet file and use a specific list
+   of features, including 'hour_cos' and 'isNight', without additional data augmentation.
+8. Added function to plot actual vs predicted power for the entire test set.
+9. Modified plotting functions to keep plots open after saving.
 """
 
 import numpy as np
@@ -75,14 +77,13 @@ class LSTMHighResForecaster:
         # Default model configuration (will be updated by hyperparameter optimization)
         # Note: These ranges might need tuning based on the 10-minute data characteristics
         self.config = {
-            'lstm_units': [64, 32],  # Default 2 LSTM layers
-            'dense_units': [32, 16],  # Default 2 dense layers
-            'dropout_rates': [0.2, 0.15], # Adaptive dropout rates for LSTM layers
+            'lstm_units': [32, 16],  # Default 2 LSTM layers
+            'dense_units': [16, 8],  # Default 2 dense layers
+            'dropout_rates': [0.4, 0.2], # Adaptive dropout rates for LSTM layers
             'dense_dropout_rates': [0.1, 0.05], # Adaptive dropout rates for dense layers
             'learning_rate': 0.001,
             'bidirectional': False,
-            'batch_norm': True
-        }
+            'batch_norm': True       }
 
     def load_data(self, data_path):
         """
@@ -321,7 +322,8 @@ class LSTMHighResForecaster:
         print(f"Total data size: {total_size}")
         print(f"Train set size: {len(train_df)}")
         print(f"Validation set size: {len(val_df)}")
-        print(f"Test set size: {len(test_df)}")
+        print(f"Test set size: {test_size}") # Corrected: Removed len() call
+
 
         # Initialize scalers for different feature groups
         # Only initialize if there are features in that group
@@ -386,7 +388,7 @@ class LSTMHighResForecaster:
             'X_train': X_train, 'y_train': y_train,
             'X_val': X_val, 'y_val': y_val,
             'X_test': X_test, 'y_test': y_test, # Scaled y_test
-            'original_test_df': test_df, # Return original test_df for post-processing checks
+            'original_test_df': test_df, # Return original test_df for post-processing checks and plotting index
             'scalers': {
                 'minmax': minmax_scaler,
                 'standard': standard_scaler,
@@ -584,7 +586,7 @@ class LSTMHighResForecaster:
 
         early_stopping = EarlyStopping(
             monitor='val_loss',
-            patience=15,
+            patience=5,
             restore_best_weights=True
         )
         callbacks.append(early_stopping)
@@ -975,14 +977,14 @@ class LSTMHighResForecaster:
 
     def plot_results(self, history, evaluation_results):
         """
-        Plot and save training history and prediction results.
+        Plot and save training history and sample prediction results.
         Plots post-processed predictions if available.
 
         Args:
             history: Training history object
             evaluation_results: Dictionary from model evaluation
         """
-        print(f"Saving training history and prediction plots to {self.results_dir}/")
+        print(f"Saving training history and sample prediction plots to {self.results_dir}/")
 
         # Plot training history
         plt.figure(figsize=(12, 5))
@@ -1005,44 +1007,15 @@ class LSTMHighResForecaster:
 
         plt.tight_layout()
         plt.savefig(os.path.join(self.results_dir, f'lstm_10min_history_{self.timestamp}.png'))
-        plt.close()
+        # plt.close() # Removed plt.close()
 
 
         # Determine which predictions to plot on scaled plots (post-processed is preferred)
         y_pred_scaled_to_plot = evaluation_results.get('y_pred_scaled_postprocessed', evaluation_results.get('y_pred_scaled_raw')) # Use get with default None or raw
         if y_pred_scaled_to_plot is None:
              print("Error: No scaled predictions available for plotting.")
-             return # Exit plot function if no predictions
-
-        plot_title_suffix_scaled = ' (Scaled, Post-processed)' if 'y_pred_scaled_postprocessed' in evaluation_results else ' (Scaled, Raw)'
-
-
-        # Plot predictions vs actual (scaled) - Sample a smaller portion for clarity if needed
-        plt.figure(figsize=(14, 7))
-
-        sample_size = min(20000, len(evaluation_results['y_test_scaled']))
-        indices = np.arange(sample_size)
-
-        plt.plot(indices, evaluation_results['y_test_scaled'][:sample_size], 'b-', label='Actual (Scaled)')
-        # Update label based on whether post-processing was applied
-        pred_label_scaled = 'Predicted (Scaled, Post-processed)' if 'y_pred_scaled_postprocessed' in evaluation_results else 'Predicted (Scaled, Raw)'
-        plt.plot(indices, y_pred_scaled_to_plot[:sample_size], 'r-', label=pred_label_scaled)
-        plt.title(f'Actual vs Predicted PV Power{plot_title_suffix_scaled} - Sample ({sample_size} points)')
-        plt.xlabel(f'Time Steps ({self.sequence_length}-step lookback)')
-        plt.ylabel('Power Output (Scaled)')
-        plt.legend()
-        plt.grid(True)
-
-        plt.savefig(os.path.join(self.results_dir, f'lstm_10min_predictions_scaled_{self.timestamp}.png'))
-        plt.close()
-
-
-        # Determine which inverse-transformed predictions to plot (post-processed is preferred)
-        y_pred_inv_to_plot = evaluation_results.get('y_pred_inv_postprocessed', evaluation_results.get('y_pred_inv_raw')) # Use get with default None or raw inverse
-        if y_pred_inv_to_plot is None:
-             print("Warning: No inverse-transformed predictions available for plotting on original scale.")
              # Still try to plot scaled scatter if no inverse data at all
-             if 'y_test_scaled' in evaluation_results and 'y_pred_scaled_to_plot' in locals(): # Check if scaled data is available
+             if 'y_test_scaled' in evaluation_results: # Check if scaled data is available
                  plt.figure(figsize=(10, 8))
                  scatter_sample_size = min(5000, len(evaluation_results['y_test_scaled']))
                  scatter_indices = np.random.choice(len(evaluation_results['y_test_scaled']), scatter_sample_size, replace=False)
@@ -1060,13 +1033,42 @@ class LSTMHighResForecaster:
                  plt.gca().set_aspect('equal', adjustable='box')
 
                  plt.savefig(os.path.join(self.results_dir, f'lstm_10min_scatter_scaled_{self.timestamp}.png'))
-                 plt.close()
-             return # Exit plot function if no inverse transformed data
+                 # plt.close() # Removed plt.close()
+             return # Exit plot function if no predictions
 
-        # Plot predictions vs actual (original scale)
+        # Define the suffix for the scaled plot title based on whether post-processing was applied
+        plot_title_suffix_scaled = ' (Scaled, Post-processed)' if 'y_pred_scaled_postprocessed' in evaluation_results else ' (Scaled, Raw)'
+
+        # Plot sample predictions vs actual (scaled)
         plt.figure(figsize=(14, 7))
 
-        sample_size_inv = min(1000, len(evaluation_results['y_test_inv']))
+        sample_size = min(1000, len(evaluation_results['y_test_scaled'])) # Reduced sample size for clarity
+        indices = np.arange(sample_size)
+
+        plt.plot(indices, evaluation_results['y_test_scaled'][:sample_size], 'b-', label='Actual (Scaled)')
+        # Update label based on whether post-processing was applied
+        pred_label_scaled = 'Predicted (Scaled, Post-processed)' if 'y_pred_scaled_postprocessed' in evaluation_results else 'Predicted (Scaled, Raw)'
+        plt.plot(indices, y_pred_scaled_to_plot[:sample_size], 'r-', label=pred_label_scaled)
+        plt.title(f'Actual vs Predicted PV Power{plot_title_suffix_scaled} - Sample ({sample_size} points)')
+        plt.xlabel(f'Time Steps ({self.sequence_length}-step lookback)')
+        plt.ylabel('Power Output (Scaled)')
+        plt.legend()
+        plt.grid(True)
+
+        plt.savefig(os.path.join(self.results_dir, f'lstm_10min_predictions_scaled_sample_{self.timestamp}.png'))
+        # plt.close() # Removed plt.close()
+
+
+        # Determine which inverse-transformed predictions to plot (post-processed is preferred)
+        y_pred_inv_to_plot = evaluation_results.get('y_pred_inv_postprocessed', evaluation_results.get('y_pred_inv_raw')) # Use get with default None or raw inverse
+        if y_pred_inv_to_plot is None:
+             print("Warning: No inverse-transformed predictions available for plotting on original scale.")
+             return # Exit plot function if no inverse transformed data
+
+        # Plot sample predictions vs actual (original scale)
+        plt.figure(figsize=(14, 7))
+
+        sample_size_inv = min(1000, len(evaluation_results['y_test_inv'])) # Reduced sample size for clarity
         indices_inv = np.arange(sample_size_inv)
 
         plt.plot(indices_inv, evaluation_results['y_test_inv'][:sample_size_inv], 'b-', label='Actual Power Output')
@@ -1079,10 +1081,10 @@ class LSTMHighResForecaster:
         plt.legend()
         plt.grid(True)
 
-        plt.savefig(os.path.join(self.results_dir, f'lstm_10min_predictions_{self.timestamp}.png'))
-        plt.close()
+        plt.savefig(os.path.join(self.results_dir, f'lstm_10min_predictions_sample_{self.timestamp}.png'))
+        # plt.close() # Removed plt.close()
 
-        # Create scatter plot (original scale)
+        # Create scatter plot (original scale) - Sampled for performance
         plt.figure(figsize=(10, 8))
         scatter_sample_size = min(5000, len(evaluation_results['y_test_inv']))
         scatter_indices = np.random.choice(len(evaluation_results['y_test_inv']), scatter_sample_size, replace=False)
@@ -1101,9 +1103,61 @@ class LSTMHighResForecaster:
         plt.gca().set_aspect('equal', adjustable='box')
         plt.legend() # Add legend to scatter plot
         plt.savefig(os.path.join(self.results_dir, f'lstm_10min_scatter_{self.timestamp}.png'))
-        plt.close()
+        # plt.close() # Removed plt.close()
 
-        print("Plots saved.")
+        print("Sample plots saved.")
+
+    def plot_full_test_predictions(self, evaluation_results, original_test_df):
+        """
+        Plots the actual vs predicted power output for the entire test dataset.
+
+        Args:
+            evaluation_results: Dictionary containing 'y_test_inv' and
+                                'y_pred_inv_postprocessed' (or 'y_pred_inv_raw').
+            original_test_df: The original (unscaled) DataFrame for the test set.
+                              Used to get the datetime index for plotting.
+                              Must be the full test set DataFrame returned by split_and_scale_data.
+        """
+        print("\nPlotting actual vs predicted for the entire test set...")
+
+        y_test_inv = evaluation_results.get('y_test_inv')
+        y_pred_inv_to_plot = evaluation_results.get('y_pred_inv_postprocessed', evaluation_results.get('y_pred_inv_raw'))
+
+        if y_test_inv is None or y_pred_inv_to_plot is None:
+            print("Warning: Actual or predicted inverse transformed data not available for full test plot.")
+            return
+
+        # The predictions correspond to the timestamps starting after the sequence length
+        # in the original test DataFrame.
+        # The length of y_test_inv and y_pred_inv_to_plot should be len(original_test_df) - sequence_length.
+        # We need to get the index slice from original_test_df that matches these predictions.
+        prediction_index = original_test_df.index[self.sequence_length:]
+
+        # Ensure the index length matches the prediction length
+        if len(prediction_index) != len(y_test_inv):
+            print(f"Warning: Index length ({len(prediction_index)}) does not match prediction length ({len(y_test_inv)}). Cannot plot full test predictions.")
+            return
+
+        plt.figure(figsize=(18, 8)) # Larger figure for the full test set
+        plt.plot(prediction_index, y_test_inv, label='Actual Power Output')
+
+        # Update label based on whether post-processing was applied
+        pred_label_inv = 'Predicted Power Output (Post-processed)' if 'y_pred_inv_postprocessed' in evaluation_results else 'Predicted Power Output (Raw)'
+        plt.plot(prediction_index, y_pred_inv_to_plot, label=pred_label_inv, alpha=0.7) # Use alpha for potentially dense plots
+
+        plt.title('Actual vs Predicted PV Power (W) - Full Test Set')
+        plt.xlabel('Time')
+        plt.ylabel('Power Output (W)')
+        plt.legend()
+        plt.grid(True)
+        plt.xticks(rotation=45) # Rotate x-axis labels for better readability
+        plt.tight_layout() # Adjust layout to prevent labels overlapping
+
+        plot_path = os.path.join(self.results_dir, f'lstm_10min_predictions_full_test_{self.timestamp}.png')
+        plt.savefig(plot_path)
+        # plt.close() # Removed plt.close()
+
+        print(f"Full test prediction plot saved to {plot_path}")
 
 
     def run_pipeline(self, data_path, optimize_hyperparams=True, n_trials=50):
@@ -1230,8 +1284,13 @@ class LSTMHighResForecaster:
             data['feature_info'] # Pass feature_info to know radiation column name
         )
 
-        # Plot results
+        # Plot training history and sample results
         self.plot_results(history, evaluation_results)
+
+        # Plot full test predictions vs actual
+        # Pass the *full* original test DataFrame to the new plotting function
+        self.plot_full_test_predictions(evaluation_results, data['original_test_df'])
+
 
         # Save model summary
         self.save_model_summary(model, data['feature_info'], evaluation_results, data_path)
@@ -1265,6 +1324,9 @@ class LSTMHighResForecaster:
         print(f"Results plots saved to {self.results_dir}/")
         if optimize_hyperparams:
             print(f"Optuna results saved to {self.optuna_results_dir}/")
+
+        # Display all plots
+        plt.show()
 
         return evaluation_results
 
