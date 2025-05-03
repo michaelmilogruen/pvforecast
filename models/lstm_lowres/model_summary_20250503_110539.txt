@@ -1,0 +1,52 @@
+Model Summary - Timestamp: 20250503_110539
+------------------------------
+Input Data:
+    Data Path: data/processed/station_data_1h.parquet
+    Sequence Length: 3
+    Features Used (13): ['GlobalRadiation [W m-2]', 'ClearSkyDHI', 'ClearSkyGHI', 'ClearSkyDNI', 'ClearSkyIndex', 'Temperature [degree_Celsius]', 'SolarZenith [degrees]', 'AOI [degrees]', 'WindSpeed [m s-1]', 'isNight', 'hour_cos', 'day_sin', 'day_cos']
+------------------------------
+Model Configuration (from best Optuna trial or default):
+    lstm_units: [109, 109]
+    dense_units: [47]
+    dropout_rates: [0.4853508429310843, 0.31348184305672455]
+    dense_dropout_rates: []
+    learning_rate: 0.0024655113678122777
+    bidirectional: True
+    batch_norm: False
+------------------------------
+Model Architecture (Summary from one of the final trained models):
+Model: "sequential"
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
+┃ Layer (type)                         ┃ Output Shape                ┃         Param # ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
+│ bidirectional (Bidirectional)        │ (None, 3, 218)              │         107,256 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dropout (Dropout)                    │ (None, 3, 218)              │               0 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ bidirectional_1 (Bidirectional)      │ (None, 218)                 │         286,016 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dropout_1 (Dropout)                  │ (None, 218)                 │               0 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dense (Dense)                        │ (None, 47)                  │          10,293 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dense_1 (Dense)                      │ (None, 1)                   │              48 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ scaled_output_clipping (Lambda)      │ (None, 1)                   │               0 │
+└──────────────────────────────────────┴─────────────────────────────┴─────────────────┘
+ Total params: 403,613 (1.54 MB)
+ Trainable params: 403,613 (1.54 MB)
+ Non-trainable params: 0 (0.00 B)
+
+------------------------------
+Evaluation Results (Final Test Set):
+    Metrics (Post-processed, Original Scale):
+    RMSE: 0.04
+    MAE: 0.02
+    MAPE: 927693.64%
+    SMAPE: 25.56%
+    R²: 0.8833
+------------------------------
+Scalers saved to: models/lstm_lowres/*_scaler_20250503_110539.pkl
+Final TSCV models saved to: models/lstm_lowres\final_tscv_models/
+Results plots saved to: results/lstm_lowres_*20250503_110539.png
+Optuna study database: results\lstm_lowres_optuna/optuna_study_20250503_110539.db
