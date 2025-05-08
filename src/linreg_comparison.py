@@ -4,6 +4,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import os
 import math # Import math for pi
+import joblib # Import joblib for saving the model
 
 def calculate_smape(y_true, y_pred):
     """
@@ -36,13 +37,14 @@ def calculate_mape(y_true, y_pred):
     return mape
 
 
-def run_linear_regression_comparison(data_path='data/processed/station_data_10min.parquet'):
+def run_linear_regression_comparison(data_path='data/processed/station_data_10min.parquet', model_dir='model/'):
     """
-    Runs a linear regression model using Global Radiation to predict PV Power
-    and evaluates its performance using the same metrics as the LSTM script.
+    Runs a linear regression model using Global Radiation to predict PV Power,
+    evaluates its performance, and saves the trained model.
 
     Args:
         data_path: Path to the 10-minute resolution data file.
+        model_dir: Directory where the trained model will be saved.
 
     Returns:
         Dictionary of evaluation metrics for the linear regression model.
@@ -143,6 +145,22 @@ def run_linear_regression_comparison(data_path='data/processed/station_data_10mi
     model.fit(X_train, y_train)
     print("Training complete.")
 
+    # --- Model Saving ---
+    model_filename = 'linear_regression_model.joblib'
+    save_path = os.path.join(model_dir, model_filename)
+
+    print(f"\nAttempting to save the model to {save_path}...")
+    try:
+        # Create the model directory if it doesn't exist
+        os.makedirs(model_dir, exist_ok=True)
+
+        # Save the model using joblib
+        joblib.dump(model, save_path)
+        print("Model saved successfully.")
+    except Exception as e:
+        print(f"Error saving the model: {e}")
+        # Continue with evaluation even if saving fails
+
     # --- Prediction ---
     print("Making predictions on the test set...")
     y_pred_raw = model.predict(X_test)
@@ -198,9 +216,11 @@ def run_linear_regression_comparison(data_path='data/processed/station_data_10mi
 if __name__ == "__main__":
     # Default data path (modify if your file is elsewhere)
     DATA_PATH = 'data/processed/station_data_10min.parquet'
+    # Default model directory
+    MODEL_DIRECTORY = 'model/'
 
-    # Run the linear regression comparison
-    metrics = run_linear_regression_comparison(data_path=DATA_PATH)
+    # Run the linear regression comparison and save the model
+    metrics = run_linear_regression_comparison(data_path=DATA_PATH, model_dir=MODEL_DIRECTORY)
 
     if metrics:
         print("\n--- Linear Regression Final Results (Test Set) ---")
@@ -212,4 +232,3 @@ if __name__ == "__main__":
         print("-" * 45)
     else:
         print("\nLinear Regression comparison failed.")
-

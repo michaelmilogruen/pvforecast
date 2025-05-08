@@ -66,7 +66,7 @@ def build_lstm_model(n_steps, n_features):
         Dense(32, activation='relu'),
         Dense(1) # Output layer for regression
     ])
-    model.compile(loss='mse', optimizer=Adam(learning_rate=0.0005), metrics=['mse', 'mae'])
+    model.compile(loss='mae', optimizer=Adam(learning_rate=0.0005), metrics=['mse', 'mae'])
     return model
 
 

@@ -8,10 +8,12 @@ import pvlib
 from pvlib.location import Location
 from pvlib.clearsky import simplified_solis
 from sklearn.preprocessing import MinMaxScaler, StandardScaler # Still included, but not used in this version - good for future scaling step
-import joblib # Still included, but not used in this version - good for saving scalers later
+import joblib # Used for loading the model
 import matplotlib.pyplot as plt
 import seaborn as sns
 import logging # Using logging instead of print for better output control
+from sklearn.linear_model import LinearRegression # Import LinearRegression for type hinting if desired, though not strictly needed for loading
+from typing import Union # Import Union for type hinting compatibility with older Python versions
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -52,6 +54,29 @@ class StationDataProcessor:
         self.minmax_scaler = None
         self.standard_scaler = None
 
+        # Linear Regression Model for Imputation
+        self.imputation_model = None
+        self.imputation_model_path = "model/linear_regression_model.joblib" # Path to your model
+
+    def load_imputation_model(self):
+        """
+        Loads the pre-trained linear regression model for power imputation.
+        """
+        if self.imputation_model is None:
+            try:
+                logging.info(f"Attempting to load imputation model from {self.imputation_model_path}")
+                # Use 'rb' mode for reading binary files
+                with open(self.imputation_model_path, 'rb') as f:
+                    self.imputation_model = joblib.load(f)
+                logging.info("Imputation model loaded successfully.")
+            except FileNotFoundError:
+                logging.error(f"Imputation model not found at {self.imputation_model_path}. Imputation will not be performed.")
+                self.imputation_model = None # Ensure it's None if loading fails
+            except Exception as e:
+                logging.error(f"Error loading imputation model from {self.imputation_model_path}: {e}")
+                self.imputation_model = None # Ensure it's None if loading fails
+
+
     def import_pv_data(self, file_path: str) -> pd.DataFrame:
         """
         Import PV data from a semicolon-separated CSV file with European decimal format.
@@ -75,8 +100,15 @@ class StationDataProcessor:
         # Debug: Print some statistics about raw data before processing
         logging.info(f"Raw PV data shape: {df.shape}")
         logging.info(f"Raw PV data columns: {df.columns.tolist()}")
-        logging.info(f"Sample of raw PV data 'PV Leistung' column: {df['PV Leistung'].head(10).tolist()}")
-        logging.info(f"Number of non-zero 'PV Leistung' values: {(pd.to_numeric(df['PV Leistung'], errors='coerce') > 0).sum()}")
+        # Check if 'PV Leistung' exists before accessing
+        if 'PV Leistung' in df.columns:
+            logging.info(f"Sample of raw PV data 'PV Leistung' column: {df['PV Leistung'].head(10).tolist()}")
+            # Ensure column is numeric before summing non-zero values
+            power_col_numeric = pd.to_numeric(df['PV Leistung'], errors='coerce')
+            logging.info(f"Number of non-zero 'PV Leistung' values: {(power_col_numeric > 0).sum()}")
+        else:
+            logging.warning("'PV Leistung' column not found in raw PV data.")
+
 
         # Convert timestamp to datetime and set as index
         df['Datum und Uhrzeit'] = pd.to_datetime(df['Datum und Uhrzeit'],
@@ -95,7 +127,11 @@ class StationDataProcessor:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
         # Debug: Check power_w values after conversion
-        logging.info(f"Number of non-zero power_w values after conversion: {(df['power_w'] > 0).sum()}")
+        if 'power_w' in df.columns:
+             logging.info(f"Number of non-zero power_w values after conversion: {(df['power_w'] > 0).sum()}")
+        else:
+             logging.warning("'power_w' column not found after renaming and conversion.")
+
 
         # Make index timezone-aware to match station data
         # Assume data is in local time (Europe/Vienna) and convert to UTC
@@ -112,11 +148,17 @@ class StationDataProcessor:
         df = df.tz_convert('UTC')
 
         # Debug: Check power_w values after timezone conversion
-        logging.info(f"Number of non-zero power_w values after timezone conversion: {(df['power_w'] > 0).sum()}")
+        if 'power_w' in df.columns:
+             logging.info(f"Number of non-zero power_w values after timezone conversion: {(df['power_w'] > 0).sum()}")
+
 
         logging.info(f"Imported PV data: {len(df)} rows, columns: {df.columns.tolist()}")
-        logging.info(f"Time range: {df.index.min()} to {df.index.max()}")
-        logging.info(f"PV data index timezone: {df.index.tz}")
+        if not df.empty:
+            logging.info(f"Time range: {df.index.min()} to {df.index.max()}")
+            logging.info(f"PV data index timezone: {df.index.tz}")
+        else:
+            logging.info("Imported PV data is empty.")
+
 
         return df
 
@@ -166,6 +208,10 @@ class StationDataProcessor:
 
             df = pd.concat(chunks)
             logging.info(f"Finished reading {filepath}. Total shape: {df.shape}")
+            if not df.empty:
+                logging.info(f"Time range: {df.index.min()} to {df.index.max()}")
+            else:
+                logging.info(f"DataFrame from {filepath} is empty after reading.")
             return df
 
         except Exception as e:
@@ -231,7 +277,10 @@ class StationDataProcessor:
         logging.info(f"Processed station data shape after initial renaming: {df.shape}")
         logging.info("Sample of processed station data:")
         logging.info(df.head())
-        logging.info(f"Station data index timezone: {df.index.tz}")
+        if not df.empty:
+            logging.info(f"Station data index timezone: {df.index.tz}")
+        else:
+             logging.info("Processed station data is empty.")
 
 
         return df
@@ -288,6 +337,7 @@ class StationDataProcessor:
         if 'GlobalRadiation [W m-2]' in df_out.columns:
             # Ensure the column is numeric before comparison
             df_out['GlobalRadiation [W m-2]'] = pd.to_numeric(df_out['GlobalRadiation [W m-2]'], errors='coerce').fillna(0)
+            # Corrected column name in mask creation
             df_out['isNight_irradiation'] = (df_out['GlobalRadiation [W m-2]'] < NIGHT_THRESHOLD).astype(int)
             logging.info(f"Created isNight mask based on GlobalRadiation < {NIGHT_THRESHOLD} W/m².")
         else:
@@ -512,7 +562,9 @@ class StationDataProcessor:
         else:
              # If the dataframe is empty, give the index a name and timezone for consistency before merge
              calculated_pvlib_features.index.name = 'datetime'
-             calculated_pvlib_features = calculated_pvlib_features.tz_localize(self.tz_utc) # Make empty index UTC-aware
+             # Only attempt to localize if the index is not empty
+             if not calculated_pvlib_features.index.empty:
+                 calculated_pvlib_features = calculated_pvlib_features.tz_localize(self.tz_utc) # Make empty index UTC-aware
 
 
         # --- Merge the calculated pvlib features back to the original dataframe index ---
@@ -672,7 +724,7 @@ class StationDataProcessor:
              # Log number of NaNs introduced during numeric conversion for these columns
              nan_count_numeric = df_processed_pv[col].isna().sum()
              if nan_count_numeric > 0:
-                 logging.warning(f"Converted '{col}' to numeric, found {nan_count_numeric} NaN values.")
+                  logging.warning(f"Converted '{col}' to numeric, found {nan_count_numeric} NaN values.")
 
 
         # --- Final Check for 'power_w' ---
@@ -833,9 +885,9 @@ class StationDataProcessor:
                        axes[ax_idx].set_ylabel('PV Power [W]')
 
              else:
-                 axes[ax_idx].set_title('Not enough data or missing columns for scatter plot')
-                 axes[ax_idx].set_xlabel('Global Radiation [W/m²]')
-                 axes[ax_idx].set_ylabel('PV Power [W]')
+                  axes[ax_idx].set_title('Not enough data or missing columns for scatter plot')
+                  axes[ax_idx].set_xlabel('Global Radiation [W/m²]')
+                  axes[ax_idx].set_ylabel('PV Power [W]')
 
              ax_idx += 1
 
@@ -846,12 +898,18 @@ class StationDataProcessor:
 
         plt.tight_layout()
         plt.show()
-        logging.info("Finished generating data quality plots.")
+        logging.info("Finished generating specific variable plots.")
 
-    def plot_specific_variables(self, df: pd.DataFrame, title_suffix: str = ""):
+    def plot_specific_variables(self, df: pd.DataFrame, title_suffix: str = "", imputed_mask: Union[pd.Series, None] = None):
         """
         Plots specific key variables (Power, Global Radiation, AOI, Clear Sky Index)
-        as vertical subplots over time.
+        as vertical subplots over time. Optionally highlights imputed power data.
+
+        Args:
+            df: The DataFrame to plot.
+            title_suffix: Suffix to add to plot titles.
+            imputed_mask: Optional boolean Series indicating imputed power points.
+                          Must have the same index as df.
         """
         logging.info(f"Generating specific variable plots{title_suffix}...")
 
@@ -890,41 +948,63 @@ class StationDataProcessor:
 
         # Plot Power
         if can_plot_power:
-            df['power_w'].plot(ax=axes[ax_idx], color='orange', label='PV Power')
-            axes[ax_idx].set_title(f'PV Power Output{title_suffix}')
-            axes[ax_idx].set_ylabel('Power [W]')
-            axes[ax_idx].grid(True)
-            axes[ax_idx].legend()
+            ax = axes[ax_idx]
+            # Plot all power data first as a base layer
+            df['power_w'].plot(ax=ax, color='orange', label='PV Power (Original/Imputed)')
+
+            # If an imputed mask is provided, plot the imputed points separately
+            if imputed_mask is not None and 'power_w' in df.columns:
+                 # Ensure the mask has the same index as the dataframe
+                 if not imputed_mask.index.equals(df.index):
+                      logging.warning("Imputed mask index does not match DataFrame index. Cannot highlight imputed data.")
+                 else:
+                      # Select the imputed power values using the mask
+                      imputed_power_data = df.loc[imputed_mask, 'power_w']
+                      if not imputed_power_data.empty:
+                           # Plot the imputed points with a different style
+                           imputed_power_data.plot(ax=ax, color='red', linestyle='None', marker='o', markersize=3, label='PV Power (Imputed)')
+                           logging.info(f"Highlighted {len(imputed_power_data)} imputed power points.")
+                      else:
+                           logging.info("No imputed power points found to highlight based on the provided mask.")
+
+
+            ax.set_title(f'PV Power Output{title_suffix}')
+            ax.set_ylabel('Power [W]')
+            ax.grid(True)
+            ax.legend()
             ax_idx += 1
 
         # Plot Global Radiation and Clear Sky GHI on the same subplot
         if can_plot_radiation:
-            df[['GlobalRadiation [W m-2]', 'ClearSkyGHI']].plot(ax=axes[ax_idx])
-            axes[ax_idx].set_title(f'Global Radiation (Measured) vs. Clear Sky GHI{title_suffix}')
-            axes[ax_idx].set_ylabel('Irradiance [W/m²]')
-            axes[ax_idx].grid(True)
-            axes[ax_idx].legend(['Measured GHI', 'Clear Sky GHI']) # Custom legend labels
+            ax = axes[ax_idx]
+            df[['GlobalRadiation [W m-2]', 'ClearSkyGHI']].plot(ax=ax)
+            ax.set_title(f'Global Radiation (Measured) vs. Clear Sky GHI{title_suffix}')
+            ax.set_ylabel('Irradiance [W/m²]')
+            ax.grid(True)
+            ax.legend(['Measured GHI', 'Clear Sky GHI']) # Custom legend labels
             ax_idx += 1
 
         # Plot AOI
         if can_plot_aoi:
-            df['AOI [degrees]'].plot(ax=axes[ax_idx], color='deepskyblue', label='AOI')
-            axes[ax_idx].set_title(f'Angle of Incidence (AOI){title_suffix}')
-            axes[ax_idx].set_ylabel('Angle [degrees]')
-            axes[ax_idx].grid(True)
-            axes[ax_idx].set_ylim(0, 180) # AOI is typically between 0 and 180 degrees
-            axes[ax_idx].legend()
+            ax = axes[ax_idx]
+            df['AOI [degrees]'].plot(ax=ax, color='deepskyblue', label='AOI')
+            ax.set_title(f'Angle of Incidence (AOI){title_suffix}')
+            ax.set_ylabel('Angle [degrees]')
+            ax.grid(True)
+            ax.set_ylim(0, 180) # AOI is typically between 0 and 180 degrees
+            ax.legend()
             ax_idx += 1
 
         # Plot Clear Sky Index
         if can_plot_csi:
-            df['ClearSkyIndex'].plot(ax=axes[ax_idx], color='red', label='Clear Sky Index')
-            axes[ax_idx].set_title(f'Clear Sky Index{title_suffix}')
-            axes[ax_idx].set_ylabel('Clear Sky Index')
-            axes[ax_idx].grid(True)
+            ax = axes[ax_idx]
+            df['ClearSkyIndex'].plot(ax=ax, color='red', label='Clear Sky Index')
+            ax.set_title(f'Clear Sky Index{title_suffix}')
+            ax.set_ylabel('Clear Sky Index')
+            ax.grid(True)
             # Removed: Setting upper limit based on CSI_HIGH_THRESHOLD_DAYTIME
             # axes[ax_idx].set_ylim(0, self.CSI_HIGH_THRESHOLD_DAYTIME + 0.5) # Set limit based on threshold
-            axes[ax_idx].legend()
+            ax.legend()
             ax_idx += 1
 
 
@@ -936,12 +1016,110 @@ class StationDataProcessor:
         logging.info("Finished generating specific variable plots.")
 
 
-    def process_and_save(self, station_path: str, pv_path: str, high_res_output: str, low_res_output: str):
+    def impute_power_w_in_range(self, df: pd.DataFrame, start_date: str, end_date: str) -> tuple[pd.DataFrame, Union[pd.Series, None]]:
+        """
+        Imputes missing power_w values within a specific date range
+        using a loaded linear regression model based on GlobalRadiation.
+        It replaces *all* power_w values in this range with imputed values.
+        Returns the updated DataFrame and a boolean Series mask indicating
+        the timestamps where imputation occurred.
+        """
+        df_out = df.copy()
+        imputed_mask = None # Initialize mask
+
+        if self.imputation_model is None:
+            logging.warning("Imputation model is not loaded. Skipping power imputation for the specified range.")
+            return df_out, imputed_mask
+
+        if 'power_w' not in df_out.columns or 'GlobalRadiation [W m-2]' not in df_out.columns:
+            logging.warning("Missing 'power_w' or 'GlobalRadiation [W m-2]' column for imputation. Skipping power imputation for the specified range.")
+            return df_out, imputed_mask
+
+        # Define the imputation date range (inclusive) in UTC
+        # Convert the input date strings to UTC-aware timestamps
+        try:
+            # Assume start and end dates are in local time (Europe/Vienna) and convert to UTC
+            impute_start_local = pd.Timestamp(start_date, tz=self.tz_local)
+            impute_end_local = pd.Timestamp(end_date + ' 23:59:59', tz=self.tz_local)
+            impute_start_utc = impute_start_local.tz_convert(self.tz_utc)
+            impute_end_utc = impute_end_local.tz_convert(self.tz_utc)
+            logging.info(f"Imputation range (Local): {impute_start_local} to {impute_end_local}")
+            logging.info(f"Imputation range (UTC): {impute_start_utc} to {impute_end_utc}")
+        except Exception as e:
+            logging.error(f"Error converting imputation date range to UTC: {e}. Skipping imputation.")
+            return df_out, imputed_mask
+
+
+        # Select the subset of data within the imputation range
+        # Ensure the index is timezone-aware before slicing
+        if not isinstance(df_out.index, pd.DatetimeIndex) or df_out.index.tz is None:
+             logging.error("DataFrame index is not timezone-aware. Cannot apply date range filter for imputation. Skipping imputation.")
+             return df_out, imputed_mask
+
+        df_range = df_out.loc[impute_start_utc:impute_end_utc].copy()
+
+        if df_range.empty:
+            logging.warning(f"No data found within the imputation range {start_date} to {end_date}. Skipping imputation for this range.")
+            return df_out, imputed_mask
+
+        # Identify timestamps within this range where GlobalRadiation is NOT NaN
+        # We will impute power_w for all these timestamps
+        valid_radiation_mask_range = df_range['GlobalRadiation [W m-2]'].notna()
+        num_valid_radiation_range = valid_radiation_mask_range.sum()
+
+        if num_valid_radiation_range == 0:
+            logging.warning(f"No valid 'GlobalRadiation [W m-2]' data available within the range {start_date} to {end_date}. Cannot perform imputation for this range.")
+            return df_out, imputed_mask
+
+        logging.info(f"Found {num_valid_radiation_range} timestamps with valid 'GlobalRadiation [W m-2]' within the range {start_date} to {end_date}. Attempting imputation for these points.")
+
+        # Select the data for imputation (GlobalRadiation for timestamps with valid radiation)
+        imputation_data_range = df_range.loc[valid_radiation_mask_range, ['GlobalRadiation [W m-2]']].copy()
+
+        # Prepare data for the model (reshape for single feature)
+        X_impute_range = imputation_data_range[['GlobalRadiation [W m-2]']].values
+
+        # Predict power_w values for these timestamps
+        try:
+            predicted_power_range = self.imputation_model.predict(X_impute_range)
+
+            # Ensure predictions are non-negative
+            predicted_power_range[predicted_power_range < 0] = 0
+
+            # Replace power_w values in the original dataframe with predictions
+            # Use the index of the imputation_data_range to ensure correct alignment
+            df_out.loc[imputation_data_range.index, 'power_w'] = predicted_power_range
+
+            logging.info(f"Successfully imputed {len(predicted_power_range)} 'power_w' values within the range {start_date} to {end_date}.")
+            # Log stats specifically for the imputed range if possible, or overall stats
+            logging.info(f"Overall power_w stats AFTER imputation in range: NaN={df_out['power_w'].isna().sum()}, zeros={(df_out['power_w'] == 0).sum()}, >0={(df_out['power_w'] > 0).sum()}")
+
+            # Create the imputed mask for the timestamps that were just imputed
+            # This mask should correspond to the indices that were in imputation_data_range
+            imputed_mask = pd.Series(False, index=df_out.index) # Start with all False
+            imputed_mask.loc[imputation_data_range.index] = True # Set True for the imputed timestamps
+
+
+        except Exception as e:
+            logging.error(f"Error during power imputation for range {start_date} to {end_date}: {e}")
+            logging.warning("Power imputation for the specified range failed. 'power_w' column may still contain original values or NaNs in this range.")
+            imputed_mask = None # If imputation failed, the mask is not reliable
+
+
+        return df_out, imputed_mask
+
+
+    def process_and_save(self, station_path: str, pv_path: str, high_res_output: str, low_res_output: str) -> tuple[pd.DataFrame, pd.DataFrame, Union[pd.Series, None]]:
         """
         Process station data and save both high-resolution and low-resolution datasets,
         ensuring alignment based on the common time range, applying quality filters (removed),
-        and calculating solar geometry features.
+        calculating solar geometry features, and imputing missing power_w values
+        specifically for a defined malfunction range.
+        Returns the high-resolution dataframe, low-resolution dataframe, and the imputation mask.
         """
+        # Load the imputation model first
+        self.load_imputation_model()
+
         # Process station data (10min resolution) - Index becomes UTC-aware
         station_df = self.process_station_data(station_path)
 
@@ -961,15 +1139,16 @@ class StationDataProcessor:
 
              # Create empty dataframes with combined index and correct timezone
              empty_high_res = pd.DataFrame(index=combined_index)
-             if empty_high_res.index.tz is None:
+             if empty_high_res.index.tz is None and not empty_high_res.empty:
                   empty_high_res = empty_high_res.tz_localize(self.tz_utc)
 
              empty_low_res_index = pd.date_range(start=empty_high_res.index.min().floor(self.low_res_frequency) if not empty_high_res.empty else None,
-                                                  end=empty_high_res.index.max().ceil(self.low_res_frequency) if not empty_high_res.empty else None,
-                                                  freq=self.low_res_frequency, tz=self.tz_utc)
+                                                 end=empty_high_res.index.max().ceil(self.low_res_frequency) if not empty_high_res.empty else None,
+                                                 freq=self.low_res_frequency, tz=self.tz_utc)
              empty_low_res = pd.DataFrame(index=empty_low_res_index)
 
-             return empty_high_res, empty_low_res
+
+             return empty_high_res, empty_low_res, None # Return None for the mask
 
         # Find the latest start time and earliest end time across both dataframes
         # Both indices are UTC-aware, so max/min works directly
@@ -997,16 +1176,52 @@ class StationDataProcessor:
              combined_index = empty_index_station.union(empty_index_pv) # Get a union of indices to potentially cover the range
 
              empty_high_res = pd.DataFrame(index=combined_index)
-             if empty_high_res.index.tz is None:
+             if empty_high_res.index.tz is None and not empty_high_res.empty:
                  empty_high_res = empty_high_res.tz_localize(self.tz_utc)
 
              empty_low_res_index = pd.date_range(start=empty_high_res.index.min().floor(self.low_res_frequency) if not empty_high_res.empty else None,
-                                                  end=empty_high_res.index.max().ceil(self.low_res_frequency) if not empty_high_res.empty else None,
-                                                  freq=self.low_res_frequency, tz=self.tz_utc)
+                                                 end=empty_high_res.index.max().ceil(self.low_res_frequency) if not empty_high_res.empty else None,
+                                                 freq=self.low_res_frequency, tz=self.tz_utc)
              empty_low_res = pd.DataFrame(index=empty_low_res_index)
 
 
-             return empty_high_res, empty_low_res
+             return empty_high_res, empty_low_res, None # Return None for the mask
+        # --- End Data Alignment ---
+
+        # --- Filter data to start from 2022-08-28 onwards ---
+        # Define the start date in the local timezone and convert to UTC
+        filter_start_date_local = pd.Timestamp('2022-08-24 00:00:00', tz=self.tz_local)
+        filter_start_date_utc = filter_start_date_local.tz_convert(self.tz_utc)
+        logging.info(f"Filtering data to start from {filter_start_date_local} ({filter_start_date_utc} UTC) onwards.")
+
+        initial_rows_station = len(station_df)
+        initial_rows_pv = len(pv_df)
+
+        # Apply the filter
+        station_df = station_df[station_df.index >= filter_start_date_utc].copy()
+        pv_df = pv_df[pv_df.index >= filter_start_date_utc].copy()
+
+        logging.info(f"Station data shape after filtering: {station_df.shape} (dropped {initial_rows_station - len(station_df)} rows)")
+        logging.info(f"PV data shape after filtering: {pv_df.shape} (dropped {initial_rows_pv - len(pv_df)} rows)")
+
+        if station_df.empty or pv_df.empty:
+            logging.error("One of the dataframes is empty after filtering to start date. Cannot merge.")
+            # Handle empty dataframes gracefully as done before
+            empty_index_station = station_df.index if not station_df.empty else pd.DatetimeIndex([], tz=self.tz_utc)
+            empty_index_pv = pv_df.index if not pv_df.empty else pd.DatetimeIndex([], tz=self.tz_utc)
+            combined_index = empty_index_station.union(empty_index_pv) # Get a union of indices to potentially cover the range
+
+            empty_high_res = pd.DataFrame(index=combined_index)
+            if empty_high_res.index.tz is None and not empty_high_res.empty:
+                empty_high_res = empty_high_res.tz_localize(self.tz_utc)
+
+            empty_low_res_index = pd.date_range(start=empty_high_res.index.min().floor(self.low_res_frequency) if not empty_high_res.empty else None,
+                                                end=empty_high_res.index.max().ceil(self.low_res_frequency) if not empty_high_res.empty else None,
+                                                freq=self.low_res_frequency, tz=self.tz_utc)
+            empty_low_res = pd.DataFrame(index=empty_low_res_index)
+
+            return empty_high_res, empty_low_res, None # Return None for the mask
+        # --- End Filter data to start from 2022-08-28 onwards ---
 
 
         # Resample PV data to 10min *after* clipping to match station data frequency
@@ -1024,16 +1239,16 @@ class StationDataProcessor:
         # Create a uniform 10-minute frequency index covering the entire period
         # This ensures both dataframes will have exactly matching timestamps
         # Ensure start and end times are not NaT before flooring/ceiling
-        if pd.isna(common_start_time) or pd.isna(common_end_time):
-            logging.error("Common start or end time is NaT. Cannot create uniform index.")
-            # Handle this error - perhaps return empty dataframes or raise exception
-            # For now, re-raise the error that caused NaT if possible, or return empty.
-            # Assuming the NaT check above handles this, proceed if times are valid.
-            pass # If we reached here, common_start/end_time should be valid datetimes
+        if pd.isna(station_df.index.min()) or pd.isna(station_df.index.max()): # Use station_df bounds after filtering
+             logging.error("Station data start or end time is NaT after filtering. Cannot create uniform index.")
+             # Handle this error - perhaps return empty dataframes or raise exception
+             # For now, re-raise the error that caused NaT if possible, or return empty.
+             # Assuming the NaT check above handles this, proceed if times are valid.
+             pass # If we reached here, station_df index min/max should be valid datetimes
 
         full_range_index = pd.date_range(
-            start=common_start_time.floor(self.high_res_frequency),
-            end=common_end_time.ceil(self.high_res_frequency),
+            start=station_df.index.min().floor(self.high_res_frequency), # Use station_df bounds
+            end=station_df.index.max().ceil(self.high_res_frequency), # Use station_df bounds
             freq=self.high_res_frequency,
             tz=self.tz_utc
         )
@@ -1062,14 +1277,21 @@ class StationDataProcessor:
                  pv_df_uniform[col] = pv_df[col].reindex(full_range_index, method='nearest')
 
              # Debug output for raw power values
-             logging.info(f"Raw PV power values stats before reindexing: min={pv_df['power_w'].min()}, max={pv_df['power_w'].max()}, non-zero count={(pv_df['power_w'] > 0).sum()}")
+             if 'power_w' in pv_df.columns:
+                 logging.info(f"Raw PV power values stats before reindexing: min={pv_df['power_w'].min()}, max={pv_df['power_w'].max()}, non-zero count={(pv_df['power_w'] > 0).sum()}")
+             else:
+                 logging.warning("'power_w' not in original pv_df before reindexing debug.")
+
 
              # Debug check
-             logging.info(f"PV power values in pv_df_uniform after reindexing: NaN count={pv_df_uniform['power_w'].isna().sum()}")
-             # Sample of power values
-             logging.info(f"First 5 power values in pv_df_uniform: {pv_df_uniform['power_w'].head().tolist()}")
-             # Check non-zero count AFTER reindexing (should be similar to before reindexing)
-             logging.info(f"Uniform PV power_w stats in pv_df_uniform after reindexing: min={pv_df_uniform['power_w'].min()}, max={pv_df_uniform['power_w'].max()}, non-zero count={(pv_df_uniform['power_w'] > 0).sum()}")
+             if 'power_w' in pv_df_uniform.columns:
+                 logging.info(f"PV power values in pv_df_uniform after reindexing: NaN count={pv_df_uniform['power_w'].isna().sum()}")
+                 # Sample of power values
+                 logging.info(f"First 5 power values in pv_df_uniform: {pv_df_uniform['power_w'].head().tolist()}")
+                 # Check non-zero count AFTER reindexing (should be similar to before reindexing)
+                 logging.info(f"Uniform PV power_w stats in pv_df_uniform after reindexing: min={pv_df_uniform['power_w'].min()}, max={pv_df_uniform['power_w'].max()}, non-zero count={(pv_df_uniform['power_w'] > 0).sum()}")
+             else:
+                 logging.warning("'power_w' not in pv_df_uniform after reindexing debug.")
 
 
         # Now simply combine the dataframes using the index directly (since they share the same uniform index)
@@ -1079,20 +1301,20 @@ class StationDataProcessor:
         logging.info(f"Merged data shape after direct concatenation: {merged_df.shape}")
         logging.info(f"Merged data index timezone: {merged_df.index.tz}")
 
-        # Debug check power values in combined dataframe before filling NaNs
+        # Debug check power values in combined dataframe before specific imputation
         if 'power_w' in merged_df.columns:
-            power_nan_count = merged_df['power_w'].isna().sum()
-            power_zeros = (merged_df['power_w'] == 0).sum()
-            power_gt_zero = (merged_df['power_w'] > 0).sum()
-            logging.info(f"Power stats in merged_df BEFORE final NaN filling: NaN={power_nan_count}, zeros={power_zeros}, >0={power_gt_zero}")
+            power_nan_count_pre_impute = merged_df['power_w'].isna().sum()
+            power_zeros_pre_impute = (merged_df['power_w'] == 0).sum()
+            power_gt_zero_pre_impute = (merged_df['power_w'] > 0).sum()
+            logging.info(f"Power stats in merged_df BEFORE specific imputation: NaN={power_nan_count_pre_impute}, zeros={power_zeros_pre_impute}, >0={power_gt_zero_pre_impute}")
 
         # --- Debugging: Check NaN count in merged data after merge ---
         logging.info("--- Debugging NaNs in merged data after merge ---")
         if 'power_w' in merged_df.columns:
-            nan_count_merged_after_concat = merged_df['power_w'].isna().sum()
-            logging.info(f"NaN count in merged_df['power_w'] AFTER concat: {nan_count_merged_after_concat}")
+             nan_count_merged_after_concat = merged_df['power_w'].isna().sum()
+             logging.info(f"NaN count in merged_df['power_w'] AFTER concat: {nan_count_merged_after_concat}")
         else:
-            logging.warning("'power_w' column not found in merged data after concat.")
+             logging.warning("'power_w' column not found in merged data after concat.")
         logging.info("--- End Debugging NaNs in merged data after merge ---")
         # --- End Debugging ---
 
@@ -1133,16 +1355,25 @@ class StationDataProcessor:
         # --- Apply Data Quality Filtering (Removed as requested) ---
         logging.info("\nApplying data quality filtering (removed as requested)...")
         # The previous filtering steps (dropping rows based on NaNs, anomalous power, unrealistic CSI) are removed.
-        # The dataframe now contains all rows from the common time range, with 'power_w' NaNs filled with 0.0.
+        # The dataframe now contains all rows from the common time range.
         logging.info(f"Shape after removing quality filtering: {merged_df.shape}")
 
         # --- End Data Quality Filtering ---
 
 
-        # Handle any remaining missing values in target columns *after* removing filtering
-        logging.info("Handling remaining missing values in target columns...")
+        # --- Impute missing power_w values specifically in the malfunction range ---
+        # Define the malfunction date range
+        malfunction_start_date = '2023-11-24'
+        malfunction_end_date = '2023-12-15'
+        merged_df, imputed_mask = self.impute_power_w_in_range(merged_df, malfunction_start_date, malfunction_end_date)
+        # --- End Specific Imputation ---
+
+
+        # Handle any *other* remaining missing values in target columns *after* specific imputation
+        # This step fills NaNs outside the malfunction range or where imputation was not possible (e.g., missing radiation)
+        logging.info("Handling any remaining missing values in target columns (outside specific imputation range or where imputation failed)...")
         # Note: energy_interval might not exist if not in original mapping/data
-        # Include 'power_w' here for final NaN filling
+        # 'power_w' should now have NaNs filled by imputation in the specified range, but include it here as a safeguard
         target_cols_high_res = ['power_w', 'energy_wh_symo', 'energy_production_wh'] # Use the standardized names expected to be in merged_df
 
         for col in target_cols_high_res:
@@ -1156,7 +1387,7 @@ class StationDataProcessor:
                   # but helpful for debugging if a column vanishes unexpectedly.
                   logging.warning(f"Target column '{col}' not found in merged dataframe for NaN handling.")
 
-        # Debug check power values in combined dataframe after filling NaNs
+        # Debug check power values in combined dataframe after final NaN filling
         if 'power_w' in merged_df.columns:
             power_nan_count_after_fill = merged_df['power_w'].isna().sum()
             power_zeros_after_fill = (merged_df['power_w'] == 0).sum()
@@ -1176,7 +1407,11 @@ class StationDataProcessor:
         logging.info(f"High-resolution dataset shape: {high_res_df.shape}")
         logging.info("Sample of high-resolution data:")
         logging.info(high_res_df.head())
-        logging.info(f"High-resolution data index timezone: {high_res_df.index.tz}")
+        if not high_res_df.empty:
+            logging.info(f"High-resolution data index timezone: {high_res_df.index.tz}")
+        else:
+             logging.info("High-resolution dataframe is empty.")
+
         self.save_to_parquet(high_res_df, high_res_output)
 
 
@@ -1213,8 +1448,8 @@ class StationDataProcessor:
              # Resampling an empty df will raise an error, so create the index manually
              if not high_res_df.empty:
                   low_res_index = pd.date_range(start=high_res_df.index.min().floor(self.low_res_frequency),
-                                                 end=high_res_df.index.max().ceil(self.low_res_frequency),
-                                                 freq=self.low_res_frequency, tz=self.tz_utc) # Maintain UTC timezone
+                                                end=high_res_df.index.max().ceil(self.low_res_frequency),
+                                                freq=self.low_res_frequency, tz=self.tz_utc) # Maintain UTC timezone
              else:
                   low_res_index = pd.DatetimeIndex([], tz=self.tz_utc)
 
@@ -1232,7 +1467,10 @@ class StationDataProcessor:
             low_res_df = high_res_df.resample(self.low_res_frequency, origin='start').agg(agg_dict).copy() # Use .copy()
 
         logging.info(f"Low-resolution dataframe shape after resampling: {low_res_df.shape}")
-        logging.info(f"Low-resolution data index timezone: {low_res_df.index.tz}")
+        if not low_res_df.empty:
+            logging.info(f"Low-resolution data index timezone: {low_res_df.index.tz}")
+        else:
+             logging.info("Low-resolution dataframe is empty.")
 
 
         # Add time-based features to low-resolution data
@@ -1249,7 +1487,7 @@ class StationDataProcessor:
         self.save_to_parquet(low_res_df, low_res_output)
 
         logging.info("Processing complete!")
-        return high_res_df, low_res_df
+        return high_res_df, low_res_df, imputed_mask # Return the mask
 
 
 if __name__ == "__main__":
@@ -1259,28 +1497,35 @@ if __name__ == "__main__":
     PV_PATH = "data/raw_data_evt_act/merge.CSV" # Assuming this is the correct path to your PV data file
     HIGH_RES_OUTPUT = "data/processed/station_data_10min.parquet"
     LOW_RES_OUTPUT = "data/processed/station_data_1h.parquet"
+    MODEL_PATH = "model/linear_regression_model.joblib" # Path to your trained model
 
     # Ensure output directory exists
     os.makedirs("data/processed", exist_ok=True)
+    # Ensure model directory exists (though joblib.load won't create it, this is good practice)
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+
 
     # Initialize and run processor
     # Location and PV parameters are now set within the StationDataProcessor __init__
     processor = StationDataProcessor(chunk_size=100000)
+    # Set the model path in the processor instance
+    processor.imputation_model_path = MODEL_PATH
+
 
     try:
-        high_res_df, low_res_df = processor.process_and_save(STATION_PATH, PV_PATH, HIGH_RES_OUTPUT, LOW_RES_OUTPUT)
+        # process_and_save now returns the high_res_df and the imputed_mask
+        high_res_df, low_res_df, imputed_mask = processor.process_and_save(STATION_PATH, PV_PATH, HIGH_RES_OUTPUT, LOW_RES_OUTPUT)
 
         # Check if dataframes are not empty before plotting
         if not high_res_df.empty:
-            # Generate generic quality plots (optional, can be commented out)
-            # processor.plot_data_quality(high_res_df, title_suffix=" (High-Res, After Processing)")
-
-            # Generate the specific requested plots
-            processor.plot_specific_variables(high_res_df, title_suffix=" (High-Res, After Processing)")
+            # Generate the specific requested plots for the full range,
+            # passing the imputed_mask to highlight imputed points.
+            logging.info("Generating plots for the full processed range, highlighting imputed data...")
+            processor.plot_specific_variables(high_res_df, title_suffix=" (High-Res, After Processing)", imputed_mask=imputed_mask)
 
         # You could also plot low-resolution data if interested
         # if not low_res_df.empty:
-        #      processor.plot_specific_variables(low_res_df, title_suffix=" (Low-Res, After Processing)")
+        #     processor.plot_specific_variables(low_res_df, title_suffix=" (Low-Res, After Processing)")
 
     except FileNotFoundError as e:
         logging.error(f"Input file not found: {e}")
