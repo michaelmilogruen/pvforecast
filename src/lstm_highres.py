@@ -456,15 +456,15 @@ class LSTMHighResForecaster:
         if trial:
             # Suggest hyperparameters using Optuna
             # Number of layers
-            num_lstm_layers = trial.suggest_int('num_lstm_layers', 1, 4)
-            num_dense_layers = trial.suggest_int('num_dense_layers', 1, 3)
+            num_lstm_layers = trial.suggest_int('num_lstm_layers', 1, 2)
+            num_dense_layers = trial.suggest_int('num_dense_layers', 1, 2)
 
             # LSTM units for each layer
             lstm_units = []
             if num_lstm_layers >= 1:
-                lstm_units.append(trial.suggest_int('lstm_units_1', 64, 512, step=32))
+                lstm_units.append(trial.suggest_int('lstm_units_1', 32, 64, step=8))
             if num_lstm_layers >= 2:
-                lstm_units.append(trial.suggest_int('lstm_units_2', 32, 256, step=16))
+                lstm_units.append(trial.suggest_int('lstm_units_2', 16, 32, step=4))
             if num_lstm_layers >= 3:
                 lstm_units.append(trial.suggest_int('lstm_units_3', 16, 128, step=8))
             if num_lstm_layers >= 4:
@@ -474,9 +474,9 @@ class LSTMHighResForecaster:
             # Dense units for each layer
             dense_units = []
             if num_dense_layers >= 1:
-                dense_units.append(trial.suggest_int('dense_units_1', 32, 128, step=16))
+                dense_units.append(trial.suggest_int('dense_units_1', 16, 32, step=4))
             if num_dense_layers >= 2:
-                dense_units.append(trial.suggest_int('dense_units_2', 16, 64, step=8))
+                dense_units.append(trial.suggest_int('dense_units_2', 8, 16, step=2))
             if num_dense_layers >= 3:
                 dense_units.append(trial.suggest_int('dense_units_3', 8, 32, step=4))
 
