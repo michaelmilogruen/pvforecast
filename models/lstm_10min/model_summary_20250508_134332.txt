@@ -1,0 +1,62 @@
+Model Summary - Timestamp: 20250508_134332
+------------------------------
+Input Data:
+    Data Path: data/processed/station_data_10min.parquet
+    Sequence Length: 24
+    Features Used (13): ['GlobalRadiation [W m-2]', 'ClearSkyDHI', 'ClearSkyGHI', 'ClearSkyDNI', 'ClearSkyIndex', 'Temperature [degree_Celsius]', 'SolarZenith [degrees]', 'AOI [degrees]', 'WindSpeed [m s-1]', 'isNight', 'hour_cos', 'day_sin', 'day_cos']
+------------------------------
+Model Configuration:
+    lstm_units: [48]
+    dense_units: [24, 16]
+    dropout_rates: [0.2, 0.2]
+    dense_dropout_rates: [0.05, 0.05]
+    learning_rate: 0.0005
+    bidirectional: False
+    batch_norm: True
+------------------------------
+Model Architecture:
+Model: "sequential"
+_________________________________________________________________
+ Layer (type)                Output Shape              Param #   
+=================================================================
+ lstm_1 (LSTM)               (None, 48)                11904     
+                                                                 
+ batch_normalization (Batch  (None, 48)                192       
+ Normalization)                                                  
+                                                                 
+ dropout (Dropout)           (None, 48)                0         
+                                                                 
+ dense (Dense)               (None, 24)                1176      
+                                                                 
+ batch_normalization_1 (Bat  (None, 24)                96        
+ chNormalization)                                                
+                                                                 
+ dropout_1 (Dropout)         (None, 24)                0         
+                                                                 
+ dense_1 (Dense)             (None, 16)                400       
+                                                                 
+ batch_normalization_2 (Bat  (None, 16)                64        
+ chNormalization)                                                
+                                                                 
+ dense_2 (Dense)             (None, 1)                 17        
+                                                                 
+ scaled_output_clipping (La  (None, 1)                 0         
+ mbda)                                                           
+                                                                 
+=================================================================
+Total params: 13849 (54.10 KB)
+Trainable params: 13673 (53.41 KB)
+Non-trainable params: 176 (704.00 Byte)
+_________________________________________________________________
+------------------------------
+Evaluation Results (Test Set):
+    Metrics (Post-processed, Original Scale):
+    RMSE: 365.71
+    MAE: 133.16
+    MAPE: 15885431145.24%
+    SMAPE: 16.82%
+    R²: 0.9171
+------------------------------
+Scalers saved to: models/lstm_10min/*_scaler_20250508_134332.pkl
+Best model saved to: models/lstm_10min/best_model_20250508_134332.keras
+Results plots saved to: results/lstm_10min_*20250508_134332.png

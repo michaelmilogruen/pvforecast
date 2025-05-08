@@ -77,12 +77,12 @@ class LSTMHighResForecaster:
         # Default model configuration (will be updated by hyperparameter optimization)
         # Note: These ranges might need tuning based on the 10-minute data characteristics
         self.config = {
-            'lstm_units': [48, 16],  # Default 2 LSTM layers
+            'lstm_units': [48],  # Default 2 LSTM layers
             'dense_units': [24, 16],  # Default 2 dense layers
             'dropout_rates': [0.2, 0.2], # Adaptive dropout rates for LSTM layers
-            'dense_dropout_rates': [0.05, 0.025], # Adaptive dropout rates for dense layers
-            'learning_rate': 0.002,
-            'bidirectional': True,
+            'dense_dropout_rates': [0.05, 0.05], # Adaptive dropout rates for dense layers
+            'learning_rate': 0.0005,
+            'bidirectional': False,
             'batch_norm': True       }
 
     def load_data(self, data_path):
@@ -196,19 +196,19 @@ class LSTMHighResForecaster:
         # Adding day_sin and day_cos from feature engineering as they are standard.
         features = [
             'GlobalRadiation [W m-2]',
-            #'ClearSkyDHI',
-            #'ClearSkyGHI',
-            #'ClearSkyDNI',
+            'ClearSkyDHI',
+            'ClearSkyGHI',
+            'ClearSkyDNI',
             'SolarZenith [degrees]',
             'AOI [degrees]',
-            #'isNight', # Included as per user's list
+            'isNight', # Included as per user's list
             'ClearSkyIndex',
-            #'hour_cos', # Included as per user's list
+            'hour_cos', # Included as per user's list
             'Temperature [degree_Celsius]',
             'WindSpeed [m s-1]',
             # Engineered day features (derived from index, not augmentation)
-            #'day_sin',
-            #'day_cos',
+            'day_sin',
+            'day_cos',
         ]
 
         # Verify all intended features exist in the dataframe after loading and engineering
@@ -603,7 +603,7 @@ class LSTMHighResForecaster:
         reduce_lr = ReduceLROnPlateau(
             monitor='val_loss',
             factor=0.5,
-            patience=7,
+            patience=5,
             min_lr=1e-7,
             verbose=0 if trial else 1
         )
@@ -625,7 +625,7 @@ class LSTMHighResForecaster:
         input_shape = (X_train_seq.shape[1], X_train_seq.shape[2])
         model = self.build_model(input_shape, trial)
         callbacks = self.create_callbacks(trial)
-        epochs_for_trial = 15
+        epochs_for_trial = 5
 
         try:
             history = model.fit(
