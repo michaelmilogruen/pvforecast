@@ -47,7 +47,7 @@ def clip_scaled_output(x):
     return tf.clip_by_value(x, clip_value_min=0.0, clip_value_max=tf.float32.max)
 
 class LSTMHighResForecaster:
-    def __init__(self, sequence_length=144, batch_size=32, epochs=50):
+    def __init__(self, sequence_length=24, batch_size=32, epochs=50):
         """
         Initialize the LSTM forecaster for high-resolution (10-minute) data.
 
@@ -77,12 +77,12 @@ class LSTMHighResForecaster:
         # Default model configuration (will be updated by hyperparameter optimization)
         # Note: These ranges might need tuning based on the 10-minute data characteristics
         self.config = {
-            'lstm_units': [32, 16],  # Default 2 LSTM layers
-            'dense_units': [16, 8],  # Default 2 dense layers
-            'dropout_rates': [0.4, 0.2], # Adaptive dropout rates for LSTM layers
-            'dense_dropout_rates': [0.1, 0.05], # Adaptive dropout rates for dense layers
-            'learning_rate': 0.001,
-            'bidirectional': False,
+            'lstm_units': [48, 16],  # Default 2 LSTM layers
+            'dense_units': [24, 16],  # Default 2 dense layers
+            'dropout_rates': [0.2, 0.2], # Adaptive dropout rates for LSTM layers
+            'dense_dropout_rates': [0.05, 0.025], # Adaptive dropout rates for dense layers
+            'learning_rate': 0.002,
+            'bidirectional': True,
             'batch_norm': True       }
 
     def load_data(self, data_path):
@@ -196,19 +196,19 @@ class LSTMHighResForecaster:
         # Adding day_sin and day_cos from feature engineering as they are standard.
         features = [
             'GlobalRadiation [W m-2]',
-            'ClearSkyDHI',
-            'ClearSkyGHI',
-            'ClearSkyDNI',
+            #'ClearSkyDHI',
+            #'ClearSkyGHI',
+            #'ClearSkyDNI',
             'SolarZenith [degrees]',
             'AOI [degrees]',
-            'isNight', # Included as per user's list
+            #'isNight', # Included as per user's list
             'ClearSkyIndex',
-            'hour_cos', # Included as per user's list
+            #'hour_cos', # Included as per user's list
             'Temperature [degree_Celsius]',
             'WindSpeed [m s-1]',
             # Engineered day features (derived from index, not augmentation)
-            'day_sin',
-            'day_cos',
+            #'day_sin',
+            #'day_cos',
         ]
 
         # Verify all intended features exist in the dataframe after loading and engineering
@@ -568,7 +568,7 @@ class LSTMHighResForecaster:
 
         # Compile model
         optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-        model.compile(optimizer=optimizer, loss='mse', metrics=['mae'])
+        model.compile(optimizer=optimizer, loss='mae', metrics=['mae', 'mse'])
 
         return model
 
@@ -586,7 +586,7 @@ class LSTMHighResForecaster:
 
         early_stopping = EarlyStopping(
             monitor='val_loss',
-            patience=5,
+            patience=8,
             restore_best_weights=True
         )
         callbacks.append(early_stopping)

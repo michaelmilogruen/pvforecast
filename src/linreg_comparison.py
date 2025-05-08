@@ -5,6 +5,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import os
 import math # Import math for pi
 import joblib # Import joblib for saving the model
+import matplotlib.pyplot as plt # Import matplotlib for plotting
 
 def calculate_smape(y_true, y_pred):
     """
@@ -33,14 +34,24 @@ def calculate_mape(y_true, y_pred):
 
     epsilon = 1e-8
     # Calculate the MAPE formula
-    mape = np.mean(np.abs((y_true - y_pred) / (y_true + epsilon))) * 100
+    # Using the standard MAPE formula: Sum(|y_true - y_pred| / |y_true|) * 100 / n
+    # Handle division by zero for y_true=0
+    abs_y_true = np.abs(y_true)
+    # Create a mask for non-zero true values
+    non_zero_mask = abs_y_true > epsilon
+    # Calculate percentage error only for non-zero true values
+    percentage_error = np.zeros_like(y_true, dtype=float) # Initialize with zeros
+    percentage_error[non_zero_mask] = np.abs((y_true[non_zero_mask] - y_pred[non_zero_mask]) / abs_y_true[non_zero_mask])
+
+    mape = np.mean(percentage_error) * 100
     return mape
 
 
 def run_linear_regression_comparison(data_path='data/processed/station_data_10min.parquet', model_dir='model/'):
     """
     Runs a linear regression model using Global Radiation to predict PV Power,
-    evaluates its performance, and saves the trained model.
+    evaluates its performance, saves the trained model, and plots
+    Actual vs. Predicted values (scatter and time series) for the test set.
 
     Args:
         data_path: Path to the 10-minute resolution data file.
@@ -210,6 +221,39 @@ def run_linear_regression_comparison(data_path='data/processed/station_data_10mi
         'smape': smape,
         'r2': r2
     }
+
+    # --- Plotting Actual vs. Predicted (Scatter Plot) ---
+    print("\nGenerating Scatter plot of Actual vs. Predicted PV Power...")
+    plt.figure(figsize=(10, 6))
+    plt.scatter(y_test, y_pred_postprocessed, alpha=0.5, s=5) # s is marker size
+    plt.title('Linear Regression: Actual vs. Predicted PV Power (Test Set)')
+    plt.xlabel('Actual PV Power [W]')
+    plt.ylabel('Predicted PV Power [W]')
+    plt.grid(True)
+
+    # Optional: Add a line representing perfect predictions
+    max_val = max(y_test.max(), y_pred_postprocessed.max())
+    plt.plot([0, max_val], [0, max_val], 'r--', lw=2) # Red dashed line
+
+    plt.show() # Display the scatter plot
+
+
+    # --- Plotting Actual vs. Predicted (Time Series Plot) ---
+    print("\nGenerating Time Series plot of Actual vs. Predicted PV Power...")
+    plt.figure(figsize=(15, 6)) # Wider figure for time series
+    # Use the index from the test_df for the time axis
+    plt.plot(test_df.index, y_test, label='Actual PV Power')
+    plt.plot(test_df.index, y_pred_postprocessed, label='Predicted PV Power')
+
+    plt.title('Linear Regression: Actual vs. Predicted PV Power Over Time (Test Set)')
+    plt.xlabel('Time')
+    plt.ylabel('PV Power [W]')
+    plt.legend() # Show legend
+    plt.grid(True)
+    plt.tight_layout() # Adjust layout to prevent labels overlapping
+
+    plt.show() # Display the time series plot
+
 
     return evaluation_results
 
