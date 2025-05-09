@@ -77,12 +77,21 @@ class LSTMHighResForecaster:
         # Default model configuration (will be updated by hyperparameter optimization)
         # Note: These ranges might need tuning based on the 10-minute data characteristics
         self.config = {
+<<<<<<< HEAD
             'lstm_units': [64],  # Default 2 LSTM layers
             'dense_units': [24],  # Default 2 dense layers
             'dropout_rates': [0.3], # Adaptive dropout rates for LSTM layers
             'dense_dropout_rates': [0.1], # Adaptive dropout rates for dense layers
             'learning_rate': 0.002,
             'bidirectional': True,
+=======
+            'lstm_units': [48],  # Default 2 LSTM layers
+            'dense_units': [24, 16],  # Default 2 dense layers
+            'dropout_rates': [0.2, 0.2], # Adaptive dropout rates for LSTM layers
+            'dense_dropout_rates': [0.05, 0.05], # Adaptive dropout rates for dense layers
+            'learning_rate': 0.0005,
+            'bidirectional': False,
+>>>>>>> c059457d0a04ae26aefcac0cd45c7da0f11bd4a9
             'batch_norm': True       }
 
     def load_data(self, data_path):
@@ -603,7 +612,7 @@ class LSTMHighResForecaster:
         reduce_lr = ReduceLROnPlateau(
             monitor='val_loss',
             factor=0.5,
-            patience=7,
+            patience=5,
             min_lr=1e-7,
             verbose=0 if trial else 1
         )
@@ -625,7 +634,7 @@ class LSTMHighResForecaster:
         input_shape = (X_train_seq.shape[1], X_train_seq.shape[2])
         model = self.build_model(input_shape, trial)
         callbacks = self.create_callbacks(trial)
-        epochs_for_trial = 15
+        epochs_for_trial = 5
 
         try:
             history = model.fit(

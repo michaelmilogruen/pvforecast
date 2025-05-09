@@ -1,0 +1,51 @@
+Model Summary - Timestamp: 20250508_140208
+------------------------------
+Input Data:
+    Data Path: data/processed/station_data_10min.parquet
+    Sequence Length: 24
+    Features Used (13): ['GlobalRadiation [W m-2]', 'ClearSkyDHI', 'ClearSkyGHI', 'ClearSkyDNI', 'ClearSkyIndex', 'Temperature [degree_Celsius]', 'SolarZenith [degrees]', 'AOI [degrees]', 'WindSpeed [m s-1]', 'isNight', 'hour_cos', 'day_sin', 'day_cos']
+------------------------------
+Model Configuration:
+    lstm_units: [64]
+    dense_units: [24]
+    dropout_rates: [0.15000000000000002]
+    dense_dropout_rates: []
+    learning_rate: 0.0005494510637604654
+    bidirectional: True
+    batch_norm: False
+------------------------------
+Model Architecture:
+Model: "sequential_1"
+_________________________________________________________________
+ Layer (type)                Output Shape              Param #   
+=================================================================
+ bidirectional_1 (Bidirecti  (None, 128)               39936     
+ onal)                                                           
+                                                                 
+ dropout_1 (Dropout)         (None, 128)               0         
+                                                                 
+ dense_2 (Dense)             (None, 24)                3096      
+                                                                 
+ dense_3 (Dense)             (None, 1)                 25        
+                                                                 
+ scaled_output_clipping (La  (None, 1)                 0         
+ mbda)                                                           
+                                                                 
+=================================================================
+Total params: 43057 (168.19 KB)
+Trainable params: 43057 (168.19 KB)
+Non-trainable params: 0 (0.00 Byte)
+_________________________________________________________________
+------------------------------
+Evaluation Results (Test Set):
+    Metrics (Post-processed, Original Scale):
+    RMSE: 366.75
+    MAE: 120.84
+    MAPE: 12200591722.49%
+    SMAPE: 14.09%
+    R²: 0.9166
+------------------------------
+Scalers saved to: models/lstm_10min/*_scaler_20250508_140208.pkl
+Best model saved to: models/lstm_10min/best_model_20250508_140208.keras
+Results plots saved to: results/lstm_10min_*20250508_140208.png
+Optuna study database: results/lstm_10min_optuna/optuna_study_20250508_140208.db
