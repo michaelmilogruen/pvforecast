@@ -1,0 +1,48 @@
+Model Summary - Timestamp: 20250509_080918
+------------------------------
+Input Data:
+    Data Path: data/processed/station_data_10min.parquet
+    Sequence Length: 24
+    Features Used (13): ['GlobalRadiation [W m-2]', 'ClearSkyDHI', 'ClearSkyGHI', 'ClearSkyDNI', 'ClearSkyIndex', 'Temperature [degree_Celsius]', 'SolarZenith [degrees]', 'AOI [degrees]', 'WindSpeed [m s-1]', 'isNight', 'hour_cos', 'day_sin', 'day_cos']
+------------------------------
+Model Configuration:
+    lstm_units: [64]
+    dense_units: [24]
+    dropout_rates: [0.15]
+    dense_dropout_rates: [0]
+    learning_rate: 0.0005494510637604654
+    bidirectional: True
+    batch_norm: False
+------------------------------
+Model Architecture:
+Model: "sequential"
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
+┃ Layer (type)                         ┃ Output Shape                ┃         Param # ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
+│ bidirectional (Bidirectional)        │ (None, 128)                 │          39,936 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dropout (Dropout)                    │ (None, 128)                 │               0 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dense (Dense)                        │ (None, 24)                  │           3,096 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dense_1 (Dense)                      │ (None, 1)                   │              25 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ scaled_output_clipping (Lambda)      │ (None, 1)                   │               0 │
+└──────────────────────────────────────┴─────────────────────────────┴─────────────────┘
+ Total params: 129,173 (504.59 KB)
+ Trainable params: 43,057 (168.19 KB)
+ Non-trainable params: 0 (0.00 B)
+ Optimizer params: 86,116 (336.39 KB)
+
+------------------------------
+Evaluation Results (Test Set):
+    Metrics (Post-processed, Original Scale):
+    RMSE: 1411.18
+    MAE: 615.01
+    MAPE: 37.83%
+    SMAPE: 75.66%
+    R²: -0.2345
+------------------------------
+Scalers saved to: models/lstm_10min/*_scaler_20250509_080918.pkl
+Best model saved to: models/lstm_10min/best_model_20250509_080918.keras
+Results plots saved to: results/lstm_10min_*20250509_080918.png
