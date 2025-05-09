@@ -41,8 +41,8 @@ def create_visualizations():
 
     # Load data
     print("Loading data files...")
-    df_10min = pd.read_parquet('data/station_data_10min.parquet')
-    df_1h = pd.read_parquet('data/station_data_1h.parquet')
+    df_10min = pd.read_parquet('data/processed/station_data_10min.parquet')
+    df_1h = pd.read_parquet('data/processed/station_data_1h.parquet')
 
     print(f'10-minute data: {df_10min.shape} rows, date range: {df_10min.index.min()} to {df_10min.index.max()}')
     print(f'1-hour data: {df_1h.shape} rows, date range: {df_1h.index.min()} to {df_1h.index.max()}')
